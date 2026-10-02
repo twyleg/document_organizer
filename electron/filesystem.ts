@@ -10,6 +10,26 @@ export function validatePath(value: unknown): string {
   return normalize(value)
 }
 
+export async function renameFile(sourceValue: unknown, nameValue: unknown): Promise<string> {
+  const source = validatePath(sourceValue)
+  if (typeof nameValue !== 'string' || !nameValue.trim() || nameValue !== nameValue.trim() ||
+      nameValue === '.' || nameValue === '..' || /[<>:"/\\|?*\x00-\x1f]/.test(nameValue) || /[. ]$/.test(nameValue) ||
+      /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(nameValue)) {
+    throw new Error('Enter a valid filename without folder separators or special characters.')
+  }
+  if (!(await lstat(source)).isFile()) throw new Error('Only regular files can be renamed. Symbolic links are not supported.')
+  const destination = join(dirname(source), nameValue)
+  if (destination === source) return source
+  try { await copyFile(source, destination, constants.COPYFILE_EXCL) }
+  catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`A file named "${nameValue}" already exists. Choose another name.`)
+    throw cause
+  }
+  try { await unlink(source) }
+  catch { throw new Error(`A copy was created as "${nameValue}", but the original could not be removed. Both copies have been kept.`) }
+  return destination
+}
+
 export async function moveFile(sourceValue: unknown, folderValue: unknown): Promise<string> {
   const source = validatePath(sourceValue)
   const folder = validatePath(folderValue)

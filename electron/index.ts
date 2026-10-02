@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { basename, join, parse } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stat } from 'node:fs/promises'
-import { listDirectory, moveFile, previewFile, validatePath } from './filesystem'
+import { listDirectory, moveFile, previewFile, renameFile, validatePath } from './filesystem'
 import type { Location } from '../shared/types'
 import { readPdf, savePdf } from './pdf'
 
@@ -37,6 +37,12 @@ function registerHandlers() {
     { name: 'File system', path: parse(app.getPath('home')).root, icon: 'hdd' }
   ])
   handle('files:list', listDirectory)
+  handle('files:rename', async (source: unknown, name: unknown) => {
+    const path = await renameFile(source, name)
+    activePreview = null
+    previewGeneration++
+    return path
+  })
   handle('pdf:read', readPdf)
   handle('pdf:save', savePdf)
   handle('files:move', async (source: unknown, folder: unknown) => {

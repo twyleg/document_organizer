@@ -8,6 +8,7 @@ const api: FileBrowserAPI = {
   openFile: (path) => ipcRenderer.invoke('files:open', path),
   previewFile: (path) => ipcRenderer.invoke('files:preview', path),
   moveFile: (source, folder) => ipcRenderer.invoke('files:move', source, folder),
+  renameFile: (source, name) => ipcRenderer.invoke('files:rename', source, name),
   readPdf: (path) => ipcRenderer.invoke('pdf:read', path),
   savePdf: (path, version, pages) => ipcRenderer.invoke('pdf:save', path, version, pages)
 }

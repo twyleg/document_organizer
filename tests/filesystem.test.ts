@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, access, symlink, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { listDirectory, moveFile, previewFile, validatePath } from '../electron/filesystem'
+import { listDirectory, moveFile, previewFile, renameFile, validatePath } from '../electron/filesystem'
 
 test('lists files, folders and hidden files with metadata and parent navigation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'file-browser-'))
@@ -104,5 +104,40 @@ test('refuses to move source symlinks or overwrite destination symlinks', { skip
     await assert.rejects(moveFile(source, archive), /already exists/)
     assert.equal(await readFile(existing, 'utf8'), 'existing')
     assert.equal(await readFile(source, 'utf8'), 'scan')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('renames in place without overwriting collisions or accepting paths as names', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'document-rename-'))
+  try {
+    const source = join(root, 'scan.pdf')
+    const target = join(root, '20260301_ADAC-Beitragsrechnung.pdf')
+    await writeFile(source, 'scanned document')
+    assert.equal(await renameFile(source, 'scan.pdf'), source)
+    assert.equal(await renameFile(source, '20260301_ADAC-Beitragsrechnung.pdf'), target)
+    assert.equal(await readFile(target, 'utf8'), 'scanned document')
+    await assert.rejects(access(source))
+    await writeFile(source, 'another document')
+    await assert.rejects(renameFile(source, '20260301_ADAC-Beitragsrechnung.pdf'), /already exists/)
+    assert.equal(await readFile(source, 'utf8'), 'another document')
+    assert.equal(await readFile(target, 'utf8'), 'scanned document')
+    for (const name of ['', '.', '..', '../scan.pdf', 'folder/scan.pdf', 'folder\\scan.pdf', '/tmp/scan.pdf',
+      'bad\0.pdf', 'bad?.pdf', 'scan.pdf ', 'scan.', 'CON.pdf', null, 42]) {
+      await assert.rejects(renameFile(source, name), /valid filename/)
+    }
+    await assert.rejects(renameFile(root, 'folder'), /regular files/)
+    assert.equal(await readFile(source, 'utf8'), 'another document')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('rename refuses source links and existing destination links', { skip: process.platform === 'win32' }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'document-rename-link-'))
+  try {
+    const source = join(root, 'scan.pdf')
+    await writeFile(source, 'scanned document')
+    await symlink(source, join(root, 'link.pdf'))
+    await assert.rejects(renameFile(join(root, 'link.pdf'), 'renamed.pdf'), /Symbolic links/)
+    await assert.rejects(renameFile(source, 'link.pdf'), /already exists/)
+    assert.equal(await readFile(source, 'utf8'), 'scanned document')
   } finally { await rm(root, { recursive: true, force: true }) }
 })

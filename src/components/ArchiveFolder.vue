@@ -40,10 +40,10 @@ watch(() => props.refreshVersion, () => { if (loaded.value || expanded.value) vo
   <li class="folder-node">
     <div v-if="entry.isDirectory" class="tree-row" :class="{ selected, 'drop-active': dropActive }" @dragenter="dragOver" @dragover="dragOver" @dragleave="dragLeave" @drop.stop="drop">
       <button class="tree-toggle" :aria-expanded="expanded" :aria-label="`${expanded ? 'Collapse' : 'Expand'} ${entry.name}`" @click="toggle"><i :class="['bi', expanded ? 'bi-chevron-down' : 'bi-chevron-right']" aria-hidden="true" /></button>
-      <button class="tree-name" :aria-pressed="selected" :title="entry.path" @click="emit('select', entry.path)"><i :class="['bi', expanded ? 'bi-folder2-open' : 'bi-folder2']" aria-hidden="true" /><span>{{ entry.name }}</span><i v-if="entry.isSymbolicLink" class="bi bi-link-45deg" aria-hidden="true" /></button>
+      <button class="tree-name" data-archive-entry="folder" :aria-pressed="selected" :title="entry.path" @click="emit('select', entry.path)"><i :class="['bi', expanded ? 'bi-folder2-open' : 'bi-folder2']" aria-hidden="true" /><span>{{ entry.name }}</span><i v-if="entry.isSymbolicLink" class="bi bi-link-45deg" aria-hidden="true" /></button>
       <button class="move-button" :disabled="!canMove" :aria-label="`Move current document to ${entry.path}`" :title="`Move current document to ${entry.path}`" @click="emit('move', entry.path)">Move</button>
     </div>
-    <div v-else class="tree-file" :title="entry.path"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /><span>{{ entry.name }}</span><i v-if="entry.isSymbolicLink" class="bi bi-link-45deg" aria-hidden="true" /></div>
+    <div v-else class="tree-file" data-archive-entry="file" tabindex="0" :title="entry.path"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /><span>{{ entry.name }}</span><i v-if="entry.isSymbolicLink" class="bi bi-link-45deg" aria-hidden="true" /></div>
     <div v-if="expanded" class="tree-children">
       <p v-if="loading && !loaded" class="tree-hint" role="status">Loading folders…</p>
       <p v-else-if="error" class="tree-error" role="alert">{{ error }} <button @click="retry">Retry</button></p>

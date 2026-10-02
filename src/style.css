@@ -59,6 +59,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #356ce5; outline-
 .tree-file { display: flex; align-items: center; gap: 8px; padding: 9px 5px 9px 23px; font-size: 11px; color: #7b899d; }
 .tree-file .bi { flex-shrink: 0; font-size: 15px; }
 .tree-file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-file:focus-visible { outline: 2px solid #356ce5; outline-offset: -2px; border-radius: 5px; background: #edf3ff; }
 .success-message { margin: 10px 14px; padding: 9px 11px; border-radius: 5px; color: #31734e; background: #eef8f1; font-size: 11px; overflow-wrap: anywhere; }
 .tree-toggle { width: 23px; flex-shrink: 0; border: 0; background: transparent; color: #8c9ab0; font-size: 9px; padding: 10px 0; border-radius: 4px; }
 .tree-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: 0; background: transparent; color: inherit; text-align: left; padding: 9px 5px 9px 0; font-size: 12px; border-radius: 4px; }
@@ -106,6 +107,19 @@ button:focus-visible, input:focus-visible { outline: 2px solid #356ce5; outline-
 .pdf-thumbnail-order button { border: 0; background: transparent; color: #8392a8; font-size: 9px; padding: 2px 7px; border-radius: 3px; }
 .pdf-thumbnail-order button:hover:enabled { background: #dfeaff; color: #356ce5; }
 .pdf-notice { margin: 0; padding: 8px 14px; background: #eef8f1; color: #31734e; font-size: 11px; }
+.rename-dialog { position: fixed; inset: 0; margin: auto; width: 430px; max-width: calc(100vw - 40px); padding: 25px; border: 1px solid #dce3ed; border-radius: 12px; color: #29354a; box-shadow: 0 18px 70px #25324a35; }
+.rename-dialog::backdrop { background: #25324a55; }
+.rename-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rename-heading h2 { margin: 0; font-size: 17px; font-weight: 650; }
+.rename-icon { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 8px; color: #356ce5; background: #edf3ff; }
+.rename-current { color: #8896aa; font-size: 11px; overflow-wrap: anywhere; margin-bottom: 20px; }
+.rename-dialog label { display: block; font-size: 12px; font-weight: 600; color: #66778f; margin-bottom: 8px; }
+.rename-dialog input { width: 100%; padding: 10px 12px; border: 1px solid #d7e1ed; border-radius: 6px; font-size: 13px; color: #44536c; }
+.rename-hint { color: #8a98ac; font-size: 10px; margin: 8px 0 20px; }
+.rename-dialog .error-message { margin: 12px 0; }
+.rename-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.rename-actions button { padding: 8px 14px; font-size: 12px; }
+.rename-cancel { border: 1px solid #dce3ec; border-radius: 5px; background: #fff; color: #738399; }
 .image-viewer { width: 100%; padding: 24px; overflow: auto; text-align: center; }
 .image-viewer img { max-width: 100%; height: auto; box-shadow: 0 3px 16px #25324a18; }
 .preview-footer { display: flex; justify-content: space-between; gap: 10px; }

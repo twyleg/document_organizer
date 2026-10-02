@@ -39,6 +39,7 @@ export interface FileBrowserAPI {
   openFile(path: string): Promise<void>
   previewFile(path: string): Promise<{ url: string; kind: 'pdf' | 'image' }>
   moveFile(source: string, destinationFolder: string): Promise<string>
+  renameFile(source: string, name: string): Promise<string>
   readPdf(path: string): Promise<PdfDocumentData>
   savePdf(path: string, version: string, pages: PdfPageEdit[]): Promise<PdfDocumentData>
 }
