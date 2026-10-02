@@ -17,6 +17,8 @@
   "dependencies": {
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.13.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.3.289",
     "vue": "^3.5.43"
   },
   "devDependencies": {

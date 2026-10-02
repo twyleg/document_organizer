@@ -1,151 +1,229 @@
-5<script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import type { DirectoryListing, FileEntry, Location } from '../shared/types'
+<script setup lang="ts">
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import ArchiveFolder from './components/ArchiveFolder.vue'
+import PdfEditor from './components/PdfEditor.vue'
+import { documentDragType, useFolderDrop } from './folderDrop'
+import type { DirectoryListing } from '../shared/types'
 
-const locations = ref<Location[]>([])
-const listing = ref<DirectoryListing | null>(null)
-const pathInput = ref('')
+const inbox = ref<DirectoryListing | null>(null)
+const archive = ref<DirectoryListing | null>(null)
+const inboxLoading = ref(false)
+const archiveLoading = ref(false)
+const inboxError = ref('')
+const archiveError = ref('')
 const search = ref('')
-const showHidden = ref(false)
-const loading = ref(false)
-const error = ref('')
-const selected = ref<string | null>(null)
-const history = ref<string[]>([])
-const historyIndex = ref(-1)
-const sort = ref<'name' | 'size' | 'modified'>('name')
-const descending = ref(false)
-let request = 0
+const selectedPath = ref('')
+const destination = ref('')
+const treeVersion = ref(0)
+const moving = ref(false)
+const moveNotice = ref('')
+const draggedPath = ref('')
+let dragToken = ''
+const preview = ref<{ url: string; kind: 'pdf' | 'image' } | null>(null)
+const previewLoading = ref(false)
+const previewError = ref('')
+const editorState = ref({ dirty: false, saving: false })
+const editorLocked = computed(() => editorState.value.dirty || editorState.value.saving)
+const available = !!window.files
+let inboxRequest = 0
+let archiveRequest = 0
+let previewRequest = 0
 
-const visibleEntries = computed(() => (listing.value?.entries ?? [])
-  .filter(entry => (showHidden.value || !entry.name.startsWith('.')) && entry.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()))
-  .sort((a, b) => {
-    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
-    const result = sort.value === 'name'
-      ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-      : a[sort.value] - b[sort.value]
-    return descending.value ? -result : result
-  }))
-const currentName = computed(() => listing.value?.path.split(/[\\/]/).filter(Boolean).at(-1) ?? 'File system')
-const selectedEntry = computed(() => listing.value?.entries.find(entry => entry.path === selected.value))
-
+const files = computed(() => (inbox.value?.entries ?? [])
+  .filter(entry => !entry.isDirectory && !entry.name.startsWith('.'))
+  .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })))
+const visibleFiles = computed(() => files.value.filter(entry => entry.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
+const archiveEntries = computed(() => (archive.value?.entries ?? []).filter(entry => !entry.name.startsWith('.'))
+  .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })))
+const selected = computed(() => files.value.find(entry => entry.path === selectedPath.value))
+const canMove = computed(() => !!selected.value && !editorLocked.value && !moving.value && !inboxLoading.value && !archiveLoading.value)
+const canDrop = computed(() => !!draggedPath.value && canMove.value)
+const rootDrop = useFolderDrop(() => canDrop.value, event => { if (archive.value) dropTo(archive.value.path, event) })
+const selectedIndex = computed(() => visibleFiles.value.findIndex(entry => entry.path === selectedPath.value))
+const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 function message(cause: unknown) {
   return cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause)
 }
-async function navigate(path: string, targetIndex?: number) {
-  const id = ++request
-  loading.value = true
-  error.value = ''
-  try {
-    const result = await window.files.listDirectory(path)
-    if (id !== request) return
-    listing.value = result
-    pathInput.value = result.path
-    search.value = ''
-    selected.value = null
-    if (targetIndex !== undefined) historyIndex.value = targetIndex
-    else if (history.value[historyIndex.value] !== result.path) {
-      history.value = [...history.value.slice(0, historyIndex.value + 1), result.path]
-      historyIndex.value = history.value.length - 1
-    }
-  } catch (cause) {
-    if (id === request) error.value = message(cause)
-  } finally {
-    if (id === request) loading.value = false
-  }
-}
-async function chooseFolder() {
-  try {
-    const path = await window.files.chooseDirectory()
-    if (path) await navigate(path)
-  } catch (cause) { error.value = message(cause) }
-}
-async function open(entry: FileEntry) {
-  if (entry.isDirectory) return navigate(entry.path)
-  try { await window.files.openFile(entry.path) }
-  catch (cause) { error.value = message(cause) }
-}
-function changeSort(column: typeof sort.value) {
-  if (sort.value === column) descending.value = !descending.value
-  else { sort.value = column; descending.value = false }
-}
+function folderName(path: string) { return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path }
 function size(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 4)
   return `${(bytes / 1024 ** exponent).toFixed(1)} ${['B', 'KB', 'MB', 'GB', 'TB'][exponent]}`
 }
-const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-function icon(entry: FileEntry) {
-  if (entry.isDirectory) return 'folder-fill'
-  if (/\.(png|jpg|jpeg|gif|svg|webp)$/i.test(entry.name)) return 'file-earmark-image'
-  if (/\.(zip|gz|tar|7z)$/i.test(entry.name)) return 'file-earmark-zip'
-  if (/\.(ts|js|json|html|css|vue|py)$/i.test(entry.name)) return 'file-earmark-code'
-  return 'file-earmark-text'
+function remember(key: string, path: string) {
+  try { localStorage.setItem(`document-organizer.${key}`, path) } catch { /* Folder access works without storage. */ }
 }
-onMounted(async () => {
-  if (!window.files) { error.value = 'Start this app with npm run dev to browse files in Electron.'; return }
+async function loadInbox(path: string) {
+  const id = ++inboxRequest
+  inboxLoading.value = true
+  inboxError.value = ''
   try {
-    locations.value = await window.files.locations()
-    if (locations.value[0]) await navigate(locations.value[0].path)
-  } catch (cause) { error.value = message(cause) }
+    const result = await window.files.listDirectory(path)
+    if (id !== inboxRequest) return
+    const changed = inbox.value?.path !== result.path
+    inbox.value = result
+    if (changed) search.value = ''
+    if (changed || !files.value.some(entry => entry.path === selectedPath.value)) selectedPath.value = visibleFiles.value[0]?.path ?? ''
+    remember('inbox', result.path)
+  } catch (cause) { if (id === inboxRequest) inboxError.value = message(cause) }
+  finally { if (id === inboxRequest) inboxLoading.value = false }
+}
+async function loadArchive(path: string) {
+  const id = ++archiveRequest
+  archiveLoading.value = true
+  archiveError.value = ''
+  try {
+    const result = await window.files.listDirectory(path)
+    if (id !== archiveRequest) return
+    if (archive.value?.path !== result.path) destination.value = result.path
+    archive.value = result
+    treeVersion.value++
+    remember('archive', result.path)
+  } catch (cause) { if (id === archiveRequest) archiveError.value = message(cause) }
+  finally { if (id === archiveRequest) archiveLoading.value = false }
+}
+async function choose(kind: 'inbox' | 'archive') {
+  if (editorLocked.value) return
+  try {
+    const path = await window.files.chooseDirectory()
+    if (path) await (kind === 'inbox' ? loadInbox(path) : loadArchive(path))
+  } catch (cause) { (kind === 'inbox' ? inboxError : archiveError).value = message(cause) }
+}
+function startDrag(event: DragEvent, path: string) {
+  if (editorLocked.value || moving.value || inboxLoading.value || archiveLoading.value || !event.dataTransfer) { event.preventDefault(); return }
+  selectedPath.value = path
+  draggedPath.value = path
+  dragToken = crypto.randomUUID()
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData(documentDragType, dragToken)
+}
+function endDrag() { draggedPath.value = ''; dragToken = '' }
+function dropTo(folder: string, event: DragEvent) {
+  if (!canDrop.value || !dragToken || event.dataTransfer?.getData(documentDragType) !== dragToken) return
+  const source = draggedPath.value
+  endDrag()
+  void moveTo(folder, source)
+}
+async function moveTo(folder: string, sourcePath = selectedPath.value) {
+  const source = files.value.find(entry => entry.path === sourcePath)
+  const inputPath = inbox.value?.path
+  const archivePath = archive.value?.path
+  if (!canMove.value || !source || !inputPath || !archivePath) return
+  moving.value = true
+  moveNotice.value = ''
+  archiveError.value = ''
+  previewRequest++
+  preview.value = null
+  previewLoading.value = false
+  await nextTick()
+  let moveError = ''
+  try {
+    const target = await window.files.moveFile(source.path, folder)
+    destination.value = folder
+    moveNotice.value = `Moved ${source.name} to ${target}`
+  } catch (cause) { moveError = message(cause) }
+  finally {
+    await Promise.all([loadInbox(inputPath), loadArchive(archivePath)])
+    if (moveError) archiveError.value = moveError
+    moving.value = false
+  }
+}
+async function openOriginal() {
+  if (!selected.value || editorLocked.value) return
+  try { await window.files.openFile(selected.value.path) }
+  catch (cause) { previewError.value = message(cause) }
+}
+function step(offset: number) {
+  if (editorLocked.value) return
+  const entry = visibleFiles.value[selectedIndex.value + offset]
+  if (entry) selectedPath.value = entry.path
+}
+function selectDocument(path: string) { if (!editorLocked.value && !moving.value) selectedPath.value = path }
+function pdfSaved(metadata: { size: number; modified: number }) {
+  if (selected.value) Object.assign(selected.value, metadata)
+}
+watch(selected, async entry => {
+  const id = ++previewRequest
+  preview.value = null
+  previewError.value = ''
+  previewLoading.value = !!entry
+  if (!entry) return
+  try {
+    const result = await window.files.previewFile(entry.path)
+    if (id === previewRequest) preview.value = result
+  } catch (cause) { if (id === previewRequest) previewError.value = message(cause) }
+  finally { if (id === previewRequest) previewLoading.value = false }
+})
+onMounted(async () => {
+  if (!available) { inboxError.value = 'Launch with npm run dev to access your local documents in Electron.'; return }
+  let savedInbox: string | null = null
+  let savedArchive: string | null = null
+  try {
+    savedInbox = localStorage.getItem('document-organizer.inbox')
+    savedArchive = localStorage.getItem('document-organizer.archive')
+  } catch { /* Folder pickers work when preferences cannot be read. */ }
+  await Promise.all([savedInbox ? loadInbox(savedInbox) : undefined, savedArchive ? loadArchive(savedArchive) : undefined])
 })
 </script>
 
 <template>
-  <div class="browser-shell">
-    <aside class="sidebar">
-      <div class="brand"><span class="brand-icon"><i aria-hidden="true" class="bi bi-folder2-open" /></span> File Browser</div>
-      <div class="section-label">PLACES</div>
-      <nav aria-label="Favorite folders" class="nav flex-column gap-1">
-        <button v-for="location in locations" :key="location.name" class="nav-link text-start" :class="{ active: listing?.path === location.path }" @click="navigate(location.path)">
-          <i aria-hidden="true" :class="`bi bi-${location.icon}`" />{{ location.name }}
-        </button>
-      </nav>
-      <button class="btn btn-outline-secondary choose-button" @click="chooseFolder"><i aria-hidden="true" class="bi bi-folder-plus me-2" />Choose folder</button>
-      <div class="sidebar-footer"><i aria-hidden="true" class="bi bi-pc-display me-2" />Your files, on your computer</div>
-    </aside>
-
-    <main class="main-panel">
-      <header class="toolbar">
-        <div class="d-flex gap-1">
-          <button class="btn icon-button" aria-label="Back" title="Back" :disabled="historyIndex <= 0 || loading" @click="navigate(history[historyIndex - 1]!, historyIndex - 1)"><i aria-hidden="true" class="bi bi-arrow-left" /></button>
-          <button class="btn icon-button" aria-label="Forward" title="Forward" :disabled="historyIndex >= history.length - 1 || loading" @click="navigate(history[historyIndex + 1]!, historyIndex + 1)"><i aria-hidden="true" class="bi bi-arrow-right" /></button>
-          <button class="btn icon-button" aria-label="Parent folder" title="Parent folder" :disabled="!listing || listing.path === listing.parent || loading" @click="listing && navigate(listing.parent)"><i aria-hidden="true" class="bi bi-arrow-up" /></button>
+  <div class="organizer">
+    <header class="app-header">
+      <div class="brand"><span class="brand-icon"><i class="bi bi-files" aria-hidden="true" /></span><div><h1>Document Organizer</h1><p>A place for every document.</p></div></div>
+      <span class="local-label"><i class="bi bi-pc-display" aria-hidden="true" /> Local workspace</span>
+    </header>
+    <main class="workspace">
+      <section class="panel inbox-panel" aria-labelledby="inbox-title">
+        <header class="panel-heading"><div class="heading-label"><span class="step-number">1</span><h2 id="inbox-title">Input documents</h2><span class="count">{{ files.length }}</span></div><p>Select a scan to review.</p></header>
+        <div class="folder-controls">
+          <button class="choose-folder" :disabled="editorLocked || moving || inboxLoading || !available" @click="choose('inbox')"><i class="bi bi-folder2-open" aria-hidden="true" />{{ inbox ? 'Change input folder' : 'Choose input folder' }}</button>
+          <button class="icon-button" title="Refresh input folder" aria-label="Refresh input folder" :disabled="editorLocked || moving || !inbox || inboxLoading" @click="inbox && loadInbox(inbox.path)"><i class="bi bi-arrow-clockwise" aria-hidden="true" /></button>
         </div>
-        <form class="path-form" @submit.prevent="navigate(pathInput)">
-          <i aria-hidden="true" class="bi bi-folder2 text-secondary" />
-          <input v-model="pathInput" class="form-control" aria-label="Folder path" placeholder="Enter an absolute folder path" spellcheck="false" />
-        </form>
-        <button class="btn icon-button" aria-label="Refresh folder" title="Refresh folder" :disabled="!listing || loading" @click="listing && navigate(listing.path)"><i aria-hidden="true" class="bi bi-arrow-clockwise" /></button>
-      </header>
-
-      <section class="folder-heading">
-        <div><div class="section-label mb-1">EXPLORER</div><h1>{{ listing ? currentName : 'Your files' }}</h1><p class="text-secondary mb-0">Browse and open your local files.</p></div>
-        <div class="search-box"><i aria-hidden="true" class="bi bi-search" /><input v-model="search" class="form-control" aria-label="Search this folder" placeholder="Search this folder…" /></div>
+        <p v-if="inbox" class="folder-path" :title="inbox.path">{{ inbox.path }}</p>
+        <label v-if="inbox" class="search-box"><i class="bi bi-search" aria-hidden="true" /><input v-model="search" type="search" placeholder="Find a document…" aria-label="Filter input documents" /></label>
+        <p v-if="inboxError" class="error-message" role="alert">{{ inboxError }}</p>
+        <p v-if="inbox?.skipped" class="warning-message">{{ inbox.skipped }} unavailable item(s) could not be read.</p>
+        <div class="panel-content" :aria-busy="inboxLoading">
+          <div v-if="inboxLoading" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Reading input folder…</p></div>
+          <ul v-else-if="visibleFiles.length" class="document-list" aria-label="Input files">
+            <li v-for="entry in visibleFiles" :key="entry.path"><button class="document-row" :disabled="editorLocked || moving" :draggable="!editorLocked && !moving && !inboxLoading && !archiveLoading" :class="{ selected: entry.path === selectedPath, dragging: entry.path === draggedPath }" @dragstart="startDrag($event, entry.path)" @dragend="endDrag" :aria-pressed="entry.path === selectedPath" :title="entry.name" @click="selectDocument(entry.path)"><span class="file-icon"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /></span><span class="file-details"><span class="file-title">{{ entry.name }}</span><span class="file-meta">{{ size(entry.size) }} · {{ date.format(entry.modified) }}</span></span></button></li>
+          </ul>
+          <div v-else class="empty-state"><i class="bi bi-inbox" aria-hidden="true" /><h3>{{ !inbox ? 'Start with your scans' : search ? 'No matching documents' : 'Input folder is empty' }}</h3><p>{{ !inbox ? 'Choose the folder where your new scans arrive.' : search ? 'Try a different filename.' : 'New scans will appear here when you refresh.' }}</p></div>
+        </div>
+        <footer class="panel-footer">{{ search ? `${visibleFiles.length} of ${files.length} documents` : 'Files directly in your input folder' }}</footer>
       </section>
-      <div class="view-options">
-        <span><i aria-hidden="true" class="bi bi-list-ul me-2" />All files <span class="badge rounded-pill ms-2">{{ visibleEntries.length }}</span></span>
-        <label class="form-check form-switch mb-0"><input v-model="showHidden" class="form-check-input" type="checkbox" role="switch" /> <span class="form-check-label">Show hidden files</span></label>
-      </div>
-      <div v-if="error" class="alert alert-danger mx-4 mt-3 mb-0" role="alert">{{ error }}</div>
-      <div v-if="listing?.skipped" class="alert alert-warning mx-4 mt-3 mb-0">{{ listing.skipped }} unavailable item(s) could not be read.</div>
-
-      <div class="file-area" :aria-busy="loading">
-        <div v-if="loading" class="empty-state" role="status"><span class="spinner-border text-primary" /><p>Reading folder…</p></div>
-        <table v-else-if="visibleEntries.length" class="table file-table align-middle mb-0">
-          <thead><tr>
-            <th :aria-sort="sort === 'name' ? (descending ? 'descending' : 'ascending') : 'none'"><button @click="changeSort('name')">Name <i aria-hidden="true" v-if="sort === 'name'" :class="`bi bi-arrow-${descending ? 'down' : 'up'}`" /></button></th>
-            <th>Kind</th>
-            <th :aria-sort="sort === 'size' ? (descending ? 'descending' : 'ascending') : 'none'"><button @click="changeSort('size')">Size <i aria-hidden="true" v-if="sort === 'size'" :class="`bi bi-arrow-${descending ? 'down' : 'up'}`" /></button></th>
-            <th :aria-sort="sort === 'modified' ? (descending ? 'descending' : 'ascending') : 'none'"><button @click="changeSort('modified')">Modified <i aria-hidden="true" v-if="sort === 'modified'" :class="`bi bi-arrow-${descending ? 'down' : 'up'}`" /></button></th>
-          </tr></thead>
-          <tbody><tr v-for="entry in visibleEntries" :key="entry.path" :class="{ selected: selected === entry.path }" @click="selected = entry.path" @dblclick="open(entry)">
-            <td><button class="file-name" :title="entry.name" @click.stop="selected = entry.path" @dblclick.stop="open(entry)" @keydown.enter.prevent="open(entry)"><i aria-hidden="true" :class="['bi', `bi-${icon(entry)}`, entry.isDirectory ? 'folder-icon' : 'document-icon']" /><span>{{ entry.name }}</span><i aria-hidden="true" v-if="entry.isSymbolicLink" class="bi bi-link-45deg text-secondary" /></button></td>
-            <td>{{ entry.isDirectory ? 'Folder' : 'File' }}</td><td>{{ entry.isDirectory ? '—' : size(entry.size) }}</td><td>{{ date.format(entry.modified) }}</td>
-          </tr></tbody>
-        </table>
-        <div v-else class="empty-state"><i aria-hidden="true" class="bi bi-folder2-open" /><h2>{{ search ? 'No matching files' : 'Nothing here yet' }}</h2><p>{{ search ? 'Try a different search or show hidden files.' : 'Choose a folder or navigate to another location.' }}</p></div>
-      </div>
-      <footer class="status-bar"><span>{{ visibleEntries.length }} items<span v-if="selectedEntry"> · {{ selectedEntry.name }}</span></span><span>Double-click or press Enter to open</span></footer>
+      <section class="panel archive-panel" aria-labelledby="archive-title">
+        <header class="panel-heading"><div class="heading-label"><span class="step-number">2</span><h2 id="archive-title">Archive</h2></div><p>Drop a scan onto a folder to file it.</p></header>
+        <div class="folder-controls"><button class="choose-folder" :disabled="editorLocked || moving || archiveLoading || !available" @click="choose('archive')"><i class="bi bi-folder2-open" aria-hidden="true" />{{ archive ? 'Change archive folder' : 'Choose archive folder' }}</button><button class="icon-button" title="Refresh archive tree" aria-label="Refresh archive tree" :disabled="editorLocked || moving || !archive || archiveLoading" @click="archive && loadArchive(archive.path)"><i class="bi bi-arrow-clockwise" aria-hidden="true" /></button></div>
+        <p v-if="archive" class="folder-path" :title="archive.path">{{ archive.path }}</p>
+        <p v-if="moving" class="tree-hint" role="status">Moving document…</p>
+        <p v-if="moveNotice" class="success-message" role="status">{{ moveNotice }}</p>
+        <p v-if="archiveError" class="error-message" role="alert">{{ archiveError }}</p>
+        <p v-if="archive?.skipped" class="warning-message">{{ archive.skipped }} unavailable item(s) could not be read.</p>
+        <nav class="panel-content archive-tree" aria-label="Archive folders" :aria-busy="archiveLoading">
+          <div v-if="archiveLoading && !archive" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Reading archive…</p></div>
+          <template v-else-if="archive">
+            <div class="tree-root-row" :class="{ selected: destination === archive.path, 'drop-active': rootDrop.dropActive.value }" @dragenter="rootDrop.dragOver" @dragover="rootDrop.dragOver" @dragleave="rootDrop.dragLeave" @drop.stop="rootDrop.drop"><button class="tree-root" :aria-pressed="destination === archive.path" @click="destination = archive.path"><i class="bi bi-folder2-open" aria-hidden="true" /><span>{{ folderName(archive.path) }}</span></button><button class="move-button" :disabled="!canMove" :aria-label="`Move current document to ${archive.path}`" :title="`Move current document to ${archive.path}`" @click="moveTo(archive.path)">Move</button></div>
+            <ul class="folder-list"><ArchiveFolder v-for="entry in archiveEntries" :key="entry.path" :entry="entry" :selected="destination" :can-move="canMove" :can-drop="canDrop" :refresh-version="treeVersion" @select="destination = $event" @move="moveTo" @drop="dropTo" /></ul>
+            <p v-if="!archiveEntries.length" class="tree-hint">Archive folder is empty.</p>
+          </template>
+          <div v-else class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true" /><h3>Your digital filing cabinet</h3><p>Choose your archive root to browse its folders.</p></div>
+        </nav>
+        <footer class="panel-footer destination-footer"><span>Selected folder</span><strong :title="destination">{{ destination || 'Choose a folder in the tree' }}</strong></footer>
+      </section>
+      <section class="panel preview-panel" aria-labelledby="preview-title">
+        <header class="panel-heading"><div class="heading-label"><span class="step-number">3</span><h2 id="preview-title">Document preview</h2></div><p>Read the date, sender, and subject.</p></header>
+        <div class="preview-toolbar"><span class="preview-name" :title="selected?.name">{{ selected?.name || 'No document selected' }}</span><button class="icon-button" title="Previous document" aria-label="Previous document" :disabled="editorLocked || moving || selectedIndex <= 0 || inboxLoading" @click="step(-1)"><i class="bi bi-chevron-left" aria-hidden="true" /></button><button class="icon-button" title="Next document" aria-label="Next document" :disabled="editorLocked || moving || selectedIndex < 0 || selectedIndex >= visibleFiles.length - 1 || inboxLoading" @click="step(1)"><i class="bi bi-chevron-right" aria-hidden="true" /></button><button class="icon-button" title="Open in default application" aria-label="Open document in default application" :disabled="editorLocked || moving || !selected" @click="openOriginal"><i class="bi bi-box-arrow-up-right" aria-hidden="true" /></button></div>
+        <p v-if="previewError" class="error-message" role="alert">{{ previewError }}</p>
+        <div class="preview-canvas" :aria-busy="previewLoading">
+          <div v-if="previewLoading" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Loading document…</p></div>
+          <PdfEditor v-else-if="preview?.kind === 'pdf' && selected" :key="preview.url" :path="selected.path" @state="editorState = $event" @saved="pdfSaved" />
+          <div v-else-if="preview?.kind === 'image'" class="image-viewer"><img :src="preview.url" :alt="selected?.name" @error="previewError = 'This image could not be displayed. Try opening it in its default application.'" /></div>
+          <div v-else class="empty-state"><span class="preview-placeholder"><i class="bi bi-file-earmark-text" aria-hidden="true" /></span><h3>{{ selected ? 'Preview unavailable' : 'Take a closer look' }}</h3><p>{{ selected ? 'Use the open button above to view this document in its default application.' : 'Select an input document to view it here. PDFs and scanned images are supported.' }}</p><span v-if="!selected" class="format-label">PDF · PNG · JPEG · GIF · WebP · BMP</span></div>
+        </div>
+        <footer class="panel-footer preview-footer"><span>{{ selected ? `${size(selected.size)} · Modified ${date.format(selected.modified)}` : 'Your documents stay on your computer' }}</span><span v-if="selectedIndex >= 0">{{ selectedIndex + 1 }} / {{ visibleFiles.length }}</span></footer>
+      </section>
     </main>
+    <footer class="app-footer"><span><i class="bi bi-shield-check" aria-hidden="true" /> Manual review workspace</span><span>Filename convention: <code>YYYYMMDD_SENDER-SUBJECT.pdf</code></span></footer>
   </div>
 </template>

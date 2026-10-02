@@ -1,15 +1,44 @@
-# Electron File Browser
+# Document Organizer
 
-A simple local file browser using **Electron, TypeScript, Vue 3, Vite, and Bootstrap 5**.
+A local desktop workspace for reviewing scanned documents, built with Electron, TypeScript, Vue 3, Vite, and Bootstrap.
 
 ## Run
 
-Requires Node.js 22.12+ and npm, plus a graphical desktop for Electron. Electron downloads its desktop binary on first launch if it is not already cached.
+Requires Node.js 22.12+ and npm, plus a graphical desktop for Electron.
 
 ```sh
 npm install
 npm run dev
 ```
+
+## First version
+
+The workspace keeps three views in one window:
+
+1. **Input documents**: choose the directory where new scans arrive, select a file, filter by filename, and refresh after adding scans. Files are sorted by name and show their size and modification date.
+2. **Archive**: choose your archive root and expand folders to explore your existing filing structure, including archived files. Contents are read on demand, including linked folders, with folders sorted before files. Select a folder to see its full path below the tree. Each folder has a **Move** button on the right that moves the selected input document into that folder using its current filename. You can also drag any input file onto a folder row, including the archive root. The destination highlights while you hover; dropping moves the dragged file. Expand folders first to reach deeper destinations.
+3. **Document preview**: read and edit the selected PDF in a custom viewer with a large current page above a horizontal thumbnail strip, or view a PNG, JPEG, GIF, WebP, or BMP image. Previous/next controls step through the filtered input list. The open button opens the selected file in its default application, including formats without an embedded preview.
+
+Input and archive folder choices are remembered on this computer between sessions. Each view scrolls independently. Refresh the input folder or archive tree to pick up filesystem changes; expanded archive folders remain open when refreshed. After a move, both views refresh and the next matching input document is selected. Inaccessible folders and unavailable files produce readable errors or warnings.
+
+The input list includes files directly in the selected directory, without recursively scanning subfolders. Hidden files and folders (names beginning with a dot) are omitted. Metadata dates are filesystem modification dates, not dates extracted from document content.
+
+Moving never overwrites an existing destination file. A name conflict displays an error and leaves the input document in place. Moves also work across drives. Source symbolic links cannot be moved. If the destination copy succeeds but removing the source fails, both copies are kept and an error explains the outcome. Documents are not renamed. The intended naming convention remains `YYYYMMDD_SENDER-SUBJECT.pdf`, for example `20260301_ADAC-Beitragsrechnung.pdf`, with an archive destination such as `archive/Fahrzeuge/FAHRZEUGNAME/Versicherungen/ADAC/`.
+
+OCR, extracted dates/senders/subjects, and filename and destination suggestions are future steps. Manual filing is available through drag and drop or the folder Move buttons.
+
+## PDF page editing
+
+- Select a thumbnail to show that page in the large upper view. Page arrows and zoom controls help with review. Hold **Ctrl** and scroll the mouse wheel over the page to zoom in or out (50–300%); scrolling without Ctrl scrolls the view normally.
+- Drag thumbnails to rearrange pages. A blue insertion marker shows where the page will go. The small earlier/later buttons provide a keyboard alternative.
+- Rotate the current page left or right in 90-degree steps, or delete it. At least one page must remain.
+- **Save** applies the current order, deletions, and rotations to the original PDF. **Discard** reloads the document from disk.
+
+Edits stay in memory until you save. While changes are unsaved, switching documents, refreshing folders, opening the file externally, and moving it are disabled; save or discard to continue. Closing or reloading the window prompts before discarding unsaved edits.
+
+Saving preserves the original PDF page resources instead of turning pages into images. It writes a temporary PDF beside the original and replaces the original only after that file is complete. If another program changed the source PDF, saving is refused; discard and reload to pick up the new version. Password-protected or damaged PDFs cannot be edited. This editor is intended for scanned documents, rather than interactive forms or digitally signed PDFs.
+
+PDF rendering, fonts, character maps, and image decoders are bundled locally; previews work offline.
 
 ## Build and verify
 
@@ -21,24 +50,19 @@ npm start
 
 `npm run dev` starts Vite and Electron with renderer hot reload. `npm run build` checks TypeScript and builds to `out/`; `npm start` runs that production build. These commands do not generate an OS installer.
 
-## Features
-
-- Home, Desktop, Documents, Downloads, Pictures, and filesystem shortcuts.
-- Native folder picker and editable absolute path.
-- Back, forward, parent folder, and refresh controls.
-- Search within the current folder, hidden-file toggle, and sortable name/size/modified columns. Folders stay first.
-- Double-click a folder to navigate; double-click a file to open it in its default application. Keyboard users can focus a name and press Enter.
-- File sizes, modification times, symbolic-link indicators, and readable errors for inaccessible folders. Unavailable entries are skipped with a warning.
-
-Search is local to the current folder. Hidden files are identified by a leading dot. The browser does not create, delete, or modify files. Opening a file delegates to the OS, so only open files you trust. On Windows, use the path field or folder picker to visit other drives.
-
 ## Structure
 
-- `electron/index.ts`: window lifecycle and validated IPC handlers.
-- `electron/filesystem.ts`: directory reads with bounded concurrency.
-- `electron/preload.ts`: narrow, typed API exposed with `contextBridge`.
-- `shared/types.ts`: API and file metadata types shared by both processes.
-- `src/App.vue`: browser interface and navigation state.
-- `src/style.css`: custom styling over Bootstrap.
+- `electron/index.ts`: window lifecycle, validated IPC handlers, and a local document preview protocol.
+- `electron/filesystem.ts`: directory reads with bounded concurrency and preview format validation, and moves that refuse to overwrite existing files.
+- `electron/pdf.ts`: PDF reads, validated page edits, conflict detection, and atomic saves.
+- `electron/preload.ts`: typed API exposed through `contextBridge`.
+- `shared/types.ts`: shared API and file metadata types.
+- `src/App.vue`: three-column workspace, folder preferences, selection, and preview state.
+- `src/components/ArchiveFolder.vue`: recursive folder disclosure with lazy loading and retry.
+- `src/components/PdfEditor.vue`: page selection, rotation, deletion, reordering, and save/discard state.
+- `src/components/PdfCanvas.vue`: canvas rendering for the current page and thumbnails.
+- `src/style.css`: workspace styling over Bootstrap.
+- `tests/pdf.test.ts`: saved page order/rotation, resource preservation, invalid edits, and save conflicts.
+- `tests/filesystem.test.ts`: directory metadata, symlink/error handling, preview validation, move integrity, and collision protection tests.
 
-The renderer is sandboxed with context isolation and no Node integration. All filesystem access stays in the main process. IPC checks the calling frame; additional windows, page navigation, and permission requests are blocked.
+The renderer is sandboxed with context isolation and no Node integration. Filesystem access stays in the main process, and IPC checks the calling frame. The preview protocol serves only a selected PDF or supported image through an opaque temporary URL; it does not expose filesystem paths as navigable URLs. Additional windows, top-level page navigation, and permission requests are blocked. Documents are not uploaded to a service.
