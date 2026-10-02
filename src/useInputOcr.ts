@@ -1,6 +1,6 @@
 import { onScopeDispose, ref, watch, type Ref } from 'vue'
 import type { FileEntry, PdfDocumentData } from '../shared/types'
-import { getDocument } from './pdfRendering'
+import { extractPdfText } from './pdfText'
 
 interface TextStatus {
   key: string
@@ -19,26 +19,9 @@ export function useInputOcr(files: Ref<FileEntry[]>, paused: Ref<boolean>, saved
   let cancelCheck: (() => void) | undefined
 
   async function inspect(data: PdfDocumentData) {
-    const base = new URL('./pdf-assets/', window.location.href).href
-    const task = getDocument({ data: new Uint8Array(data.data), cMapUrl: `${base}cmaps/`, cMapPacked: true,
-      standardFontDataUrl: `${base}standard_fonts/`, wasmUrl: `${base}wasm/`, iccUrl: `${base}iccs/`, stopAtErrors: true })
-    let protectedPdf = false
-    task.onPassword = () => { protectedPdf = true; void task.destroy() }
-    cancelCheck = () => { void task.destroy() }
     try {
-      const pdf = await task.promise
-      const missing: number[] = []
-      for (let index = 1; index <= pdf.numPages; index++) {
-        const page = await pdf.getPage(index)
-        const content = await page.getTextContent()
-        if (!content.items.some(item => 'str' in item && /\S/u.test(item.str))) missing.push(index)
-        page.cleanup()
-      }
-      return { total: pdf.numPages, missing }
-    } catch (cause) {
-      if (protectedPdf) throw new Error('Password-protected PDF: automatic OCR is unavailable.')
-      throw cause
-    } finally { cancelCheck = undefined; await task.destroy() }
+      return await extractPdfText(data, task => { cancelCheck = () => { void task.destroy() } })
+    } finally { cancelCheck = undefined }
   }
 
   async function pump() {

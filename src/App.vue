@@ -16,6 +16,7 @@ const inboxError = ref('')
 const archiveError = ref('')
 const search = ref('')
 const selectedPath = ref('')
+const archivePreview = ref<FileEntry | null>(null)
 const inputList = ref<HTMLUListElement>()
 const inputPanel = ref<HTMLElement>()
 const archiveTree = ref<HTMLElement>()
@@ -47,12 +48,13 @@ const ocr = useInputOcr(files, computed(() => editorState.value.dirty || editorS
   moving.value || inboxLoading.value || !!renameEntry.value), (path, data) => {
   const file = files.value.find(entry => entry.path === path)
   if (file) Object.assign(file, { size: data.size, modified: data.modified })
-  if (selectedPath.value === path) previewRevision.value++
+  if (!archivePreview.value && selectedPath.value === path) previewRevision.value++
 })
 const visibleFiles = computed(() => files.value.filter(entry => entry.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
 const archiveEntries = computed(() => (archive.value?.entries ?? []).filter(entry => !entry.name.startsWith('.'))
   .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })))
 const selected = computed(() => files.value.find(entry => entry.path === selectedPath.value))
+const viewed = computed(() => archivePreview.value ?? selected.value)
 const canMove = computed(() => !!selected.value && !renameEntry.value && !editorLocked.value && !moving.value && !inboxLoading.value && !archiveLoading.value)
 const canDrop = computed(() => !!draggedPath.value && canMove.value)
 const rootDrop = useFolderDrop(() => canDrop.value, event => { if (archive.value) dropTo(archive.value.path, event) })
@@ -79,7 +81,7 @@ async function loadInbox(path: string) {
     if (id !== inboxRequest) return
     const changed = inbox.value?.path !== result.path
     inbox.value = result
-    if (changed) search.value = ''
+    if (changed) { search.value = ''; archivePreview.value = null }
     if (changed || !files.value.some(entry => entry.path === selectedPath.value)) selectedPath.value = visibleFiles.value[0]?.path ?? ''
     remember('inbox', result.path)
     ocr.retryErrors()
@@ -93,7 +95,7 @@ async function loadArchive(path: string) {
   try {
     const result = await window.files.listDirectory(path)
     if (id !== archiveRequest) return
-    if (archive.value?.path !== result.path) { destination.value = result.path; archiveExpanded.value = true }
+    if (archive.value?.path !== result.path) { destination.value = result.path; archiveExpanded.value = true; archivePreview.value = null }
     archive.value = result
     treeVersion.value++
     remember('archive', result.path)
@@ -109,6 +111,7 @@ async function choose(kind: 'inbox' | 'archive') {
 }
 function startDrag(event: DragEvent, path: string) {
   if (editorLocked.value || moving.value || inboxLoading.value || archiveLoading.value || !event.dataTransfer) { event.preventDefault(); return }
+  archivePreview.value = null
   selectedPath.value = path
   draggedPath.value = path
   dragToken = crypto.randomUUID()
@@ -143,25 +146,30 @@ async function moveTo(folder: string, sourcePath = selectedPath.value) {
   finally {
     await Promise.all([loadInbox(inputPath), loadArchive(archivePath)])
     if (moveError) archiveError.value = moveError
+    archivePreview.value = null
     moving.value = false
   }
 }
 async function openOriginal() {
-  if (!selected.value || editorLocked.value) return
-  try { await window.files.openFile(selected.value.path) }
+  if (!viewed.value || editorLocked.value) return
+  try { await window.files.openFile(viewed.value.path) }
   catch (cause) { previewError.value = message(cause) }
 }
 function step(offset: number) {
   if (editorLocked.value) return
   const entry = visibleFiles.value[selectedIndex.value + offset]
-  if (entry) selectedPath.value = entry.path
+  if (entry) { archivePreview.value = null; selectedPath.value = entry.path }
 }
-function selectDocument(path: string) { if (!editorLocked.value && !moving.value) selectedPath.value = path }
+function selectDocument(path: string) { if (!editorLocked.value && !moving.value) { archivePreview.value = null; selectedPath.value = path } }
+function previewArchive(entry: FileEntry) {
+  if (!editorLocked.value && !moving.value && !renameEntry.value) archivePreview.value = entry
+}
 function focusEntry(entry?: HTMLElement | null) {
   entry?.focus({ preventScroll: true })
   entry?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
 }
 function focusInput() {
+  if (!editorLocked.value) archivePreview.value = null
   const list = inputList.value
   focusEntry(list?.querySelector<HTMLButtonElement>('.document-row[aria-pressed="true"]:not(:disabled)')
     ?? list?.querySelector<HTMLButtonElement>('.document-row:not(:disabled)') ?? inputPanel.value)
@@ -213,6 +221,7 @@ async function columnShortcut(event: KeyboardEvent) {
     try {
       const path = await window.files.moveFile(source, inputPath)
       search.value = ''
+      archivePreview.value = null
       selectedPath.value = path
       moveNotice.value = `Returned ${entry?.textContent?.trim()} to ${inputPath}`
     } catch (cause) { moveError = message(cause) }
@@ -234,6 +243,7 @@ async function navigateInput(event: KeyboardEvent) {
   const focusedIndex = focused && inputList.value ? Array.from(inputList.value.querySelectorAll('.document-row')).indexOf(focused) : -1
   const start = focusedIndex >= 0 ? focusedIndex : selectedIndex.value
   const index = start < 0 ? 0 : Math.max(0, Math.min(visibleFiles.value.length - 1, start + (event.key === 'ArrowDown' ? 1 : -1)))
+  archivePreview.value = null
   selectedPath.value = visibleFiles.value[index]!.path
   await nextTick()
   const row = inputList.value?.querySelector<HTMLButtonElement>('.document-row[aria-pressed="true"]')
@@ -266,15 +276,26 @@ function navigateArchive(event: KeyboardEvent) {
     }
     return
   }
-  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key) ||
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' '].includes(event.key) ||
       event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return
   archiveTypePrefix = ''
   const tree = event.currentTarget as HTMLElement
   const target = event.target instanceof Element ? event.target : null
+  if ((event.key === 'Enter' || event.key === ' ') && target?.closest('.move-button, .tree-toggle')) return
   const row = target?.closest('.tree-row, .tree-root-row, .tree-file')
   const entry = row?.matches('[data-archive-entry]') ? row as HTMLElement : row?.querySelector<HTMLElement>('[data-archive-entry]')
   if (!entry || !tree.contains(entry)) return
   event.preventDefault()
+  if (event.key === 'Enter' || event.key === ' ') {
+    if (event.repeat) return
+    if (entry.dataset.archiveEntry === 'file') entry.click()
+    else {
+      const toggle = row?.querySelector<HTMLButtonElement>('.tree-toggle')
+      if (event.key === 'Enter' && toggle?.getAttribute('aria-expanded') === 'false') toggle.click()
+      entry.click()
+    }
+    return
+  }
   const entries = Array.from(tree.querySelectorAll<HTMLElement>('[data-archive-entry]'))
   let next: HTMLElement | null | undefined = entry
   if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
@@ -303,7 +324,7 @@ function pdfSaved(metadata: { size: number; modified: number }) {
 function renameShortcut(event: KeyboardEvent) {
   if (event.key !== 'F2') return
   event.preventDefault()
-  if (event.repeat || renameEntry.value || moving.value || inboxLoading.value || archiveLoading.value || !selected.value) return
+  if (event.repeat || renameEntry.value || moving.value || inboxLoading.value || archiveLoading.value || archivePreview.value || !selected.value) return
   if (editorLocked.value) { inboxError.value = 'Save or discard your PDF edits before renaming this document.'; return }
   inboxError.value = ''
   renameEntry.value = selected.value
@@ -317,7 +338,7 @@ async function renamed(path: string) {
   const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.document-row')).find(row => row.getAttribute('aria-pressed') === 'true')
   button?.focus()
 }
-watch(selected, async entry => {
+watch(() => moving.value ? undefined : viewed.value, async entry => {
   const id = ++previewRequest
   preview.value = null
   previewError.value = ''
@@ -382,8 +403,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', renameShortcut))
         <nav ref="archiveTree" class="panel-content archive-tree" tabindex="-1" aria-label="Archive folders" :aria-busy="archiveLoading" @keydown="navigateArchive" @focusin="rememberArchiveFocus">
           <div v-if="archiveLoading && !archive" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Reading archive…</p></div>
           <template v-else-if="archive">
-            <div class="tree-root-row" :class="{ selected: destination === archive.path, 'drop-active': rootDrop.dropActive.value }" @dragenter="rootDrop.dragOver" @dragover="rootDrop.dragOver" @dragleave="rootDrop.dragLeave" @drop.stop="rootDrop.drop"><button class="tree-toggle" :aria-expanded="archiveExpanded" :aria-label="`${archiveExpanded ? 'Collapse' : 'Expand'} archive root`" @click="archiveExpanded = !archiveExpanded"><i :class="['bi', archiveExpanded ? 'bi-chevron-down' : 'bi-chevron-right']" aria-hidden="true" /></button><button class="tree-root" data-archive-entry="folder" :title="archive.path" :aria-pressed="destination === archive.path" @click="destination = archive.path"><i :class="['bi', archiveExpanded ? 'bi-folder2-open' : 'bi-folder2']" aria-hidden="true" /><span>{{ folderName(archive.path) }}</span></button><button class="move-button" :disabled="!canMove" :aria-label="`Move current document to ${archive.path}`" :title="`Move current document to ${archive.path}`" @click="moveTo(archive.path)">Move</button></div>
-            <ul v-if="archiveExpanded" class="folder-list"><ArchiveFolder v-for="entry in archiveEntries" :key="entry.path" :entry="entry" :selected="destination" :can-move="canMove" :can-drop="canDrop" :refresh-version="treeVersion" @select="destination = $event" @move="moveTo" @drop="dropTo" /></ul>
+            <div class="tree-root-row" :class="{ selected: destination === archive.path, 'drop-active': rootDrop.dropActive.value }" @dragenter="rootDrop.dragOver" @dragover="rootDrop.dragOver" @dragleave="rootDrop.dragLeave" @drop.stop="rootDrop.drop"><button class="tree-toggle" :aria-expanded="archiveExpanded" :aria-label="`${archiveExpanded ? 'Collapse' : 'Expand'} archive root`" @click="archiveExpanded = !archiveExpanded"><i :class="['bi', archiveExpanded ? 'bi-chevron-down' : 'bi-chevron-right']" aria-hidden="true" /></button><button class="tree-root" data-archive-entry="folder" :title="archive.path" :aria-pressed="destination === archive.path" @click="destination = archive.path"><i :class="['bi', archiveExpanded ? 'bi-folder2-open' : 'bi-folder2']" aria-hidden="true" /><span>{{ folderName(archive.path) }}</span></button><button class="move-button" :disabled="!canMove" :aria-label="`Move selected input document to ${archive.path}`" :title="`Move selected input document to ${archive.path}`" @click="moveTo(archive.path)">Move</button></div>
+            <ul v-if="archiveExpanded" class="folder-list"><ArchiveFolder v-for="entry in archiveEntries" :key="entry.path" :entry="entry" :selected="destination" :viewed-path="archivePreview?.path" :can-move="canMove" :can-drop="canDrop" :refresh-version="treeVersion" @select="destination = $event" @open="previewArchive" @move="moveTo" @drop="dropTo" /></ul>
             <p v-if="archiveExpanded && !archiveEntries.length" class="tree-hint">Archive folder is empty.</p>
           </template>
           <div v-else class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true" /><h3>Your digital filing cabinet</h3><p>Choose your archive root to browse its folders.</p></div>
@@ -392,15 +413,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', renameShortcut))
       </section>
       <section class="panel preview-panel" aria-labelledby="preview-title">
         <header class="panel-heading"><div class="heading-label"><span class="step-number">3</span><h2 id="preview-title">Document preview</h2></div><p>Read the date, sender, and subject.</p></header>
-        <div class="preview-toolbar"><span class="preview-name" :title="selected?.name">{{ selected?.name || 'No document selected' }}</span><button class="icon-button" title="Previous document" aria-label="Previous document" :disabled="editorLocked || moving || selectedIndex <= 0 || inboxLoading" @click="step(-1)"><i class="bi bi-chevron-left" aria-hidden="true" /></button><button class="icon-button" title="Next document" aria-label="Next document" :disabled="editorLocked || moving || selectedIndex < 0 || selectedIndex >= visibleFiles.length - 1 || inboxLoading" @click="step(1)"><i class="bi bi-chevron-right" aria-hidden="true" /></button><button class="icon-button" title="Open in default application" aria-label="Open document in default application" :disabled="editorLocked || moving || !selected" @click="openOriginal"><i class="bi bi-box-arrow-up-right" aria-hidden="true" /></button></div>
+        <div class="preview-toolbar"><span class="preview-name" :title="viewed?.name">{{ viewed?.name || 'No document selected' }}</span><button class="icon-button" title="Previous document" aria-label="Previous document" :disabled="!!archivePreview || editorLocked || moving || selectedIndex <= 0 || inboxLoading" @click="step(-1)"><i class="bi bi-chevron-left" aria-hidden="true" /></button><button class="icon-button" title="Next document" aria-label="Next document" :disabled="!!archivePreview || editorLocked || moving || selectedIndex < 0 || selectedIndex >= visibleFiles.length - 1 || inboxLoading" @click="step(1)"><i class="bi bi-chevron-right" aria-hidden="true" /></button><button class="icon-button" title="Open in default application" aria-label="Open document in default application" :disabled="editorLocked || moving || !viewed" @click="openOriginal"><i class="bi bi-box-arrow-up-right" aria-hidden="true" /></button></div>
         <p v-if="previewError" class="error-message" role="alert">{{ previewError }}</p>
         <div class="preview-canvas" :aria-busy="previewLoading">
           <div v-if="previewLoading" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Loading document…</p></div>
-          <PdfEditor v-else-if="preview?.kind === 'pdf' && selected" :key="`${preview.url}-${previewRevision}`" :path="selected.path" :external-busy="!!ocr.activePath.value" @state="editorState = $event" @saved="pdfSaved" />
-          <div v-else-if="preview?.kind === 'image'" class="image-viewer"><img :src="preview.url" :alt="selected?.name" @error="previewError = 'This image could not be displayed. Try opening it in its default application.'" /></div>
-          <div v-else class="empty-state"><span class="preview-placeholder"><i class="bi bi-file-earmark-text" aria-hidden="true" /></span><h3>{{ selected ? 'Preview unavailable' : 'Take a closer look' }}</h3><p>{{ selected ? 'Use the open button above to view this document in its default application.' : 'Select an input document to view it here. PDFs and scanned images are supported.' }}</p><span v-if="!selected" class="format-label">PDF · PNG · JPEG · GIF · WebP · BMP</span></div>
+          <PdfEditor v-else-if="preview?.kind === 'pdf' && viewed" :key="`${preview.url}-${previewRevision}`" :path="viewed.path" :read-only="!!archivePreview" :external-busy="!!ocr.activePath.value" @state="editorState = $event" @saved="pdfSaved" />
+          <div v-else-if="preview?.kind === 'image'" class="image-viewer"><img :src="preview.url" :alt="viewed?.name" @error="previewError = 'This image could not be displayed. Try opening it in its default application.'" /></div>
+          <div v-else class="empty-state"><span class="preview-placeholder"><i class="bi bi-file-earmark-text" aria-hidden="true" /></span><h3>{{ viewed ? 'Preview unavailable' : 'Take a closer look' }}</h3><p>{{ viewed ? 'Use the open button above to view this document in its default application.' : 'Select an input document to view it here. PDFs and scanned images are supported.' }}</p><span v-if="!viewed" class="format-label">PDF · PNG · JPEG · GIF · WebP · BMP</span></div>
         </div>
-        <footer class="panel-footer preview-footer"><span>{{ selected ? `${size(selected.size)} · Modified ${date.format(selected.modified)}` : 'Your documents stay on your computer' }}</span><span v-if="selectedIndex >= 0">{{ selectedIndex + 1 }} / {{ visibleFiles.length }}</span></footer>
+        <footer class="panel-footer preview-footer"><span>{{ viewed ? `${size(viewed.size)} · Modified ${date.format(viewed.modified)}` : 'Your documents stay on your computer' }}</span><span v-if="archivePreview">Archive preview</span><span v-else-if="selectedIndex >= 0">{{ selectedIndex + 1 }} / {{ visibleFiles.length }}</span></footer>
       </section>
     </main>
     <footer class="app-footer"><span><i class="bi bi-shield-check" aria-hidden="true" /> Manual review workspace</span><span>Filename convention: <code>YYYYMMDD_SENDER-SUBJECT.pdf</code></span></footer>

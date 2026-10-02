@@ -64,6 +64,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid #356ce5; outline-
 .tree-file { display: flex; align-items: center; gap: 8px; padding: 9px 5px 9px 23px; font-size: 11px; color: #7b899d; }
 .tree-file .bi { flex-shrink: 0; font-size: 15px; }
 .tree-file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-file[role="button"] { cursor: pointer; border-radius: 5px; }
+.tree-file[role="button"]:hover { background: #f6f8fc; }
+.tree-file.selected { color: #356ce5; background: #edf3ff; }
 .tree-file:focus-visible { outline: 2px solid #356ce5; outline-offset: -2px; border-radius: 5px; background: #edf3ff; }
 .success-message { margin: 10px 14px; padding: 9px 11px; border-radius: 5px; color: #31734e; background: #eef8f1; font-size: 11px; overflow-wrap: anywhere; }
 .tree-toggle { width: 23px; flex-shrink: 0; border: 0; background: transparent; color: #8c9ab0; font-size: 9px; padding: 10px 0; border-radius: 4px; }
@@ -112,15 +115,59 @@ button:focus-visible, input:focus-visible { outline: 2px solid #356ce5; outline-
 .pdf-thumbnail-order button { border: 0; background: transparent; color: #8392a8; font-size: 9px; padding: 2px 7px; border-radius: 3px; }
 .pdf-thumbnail-order button:hover:enabled { background: #dfeaff; color: #356ce5; }
 .pdf-notice { margin: 0; padding: 8px 14px; background: #eef8f1; color: #31734e; font-size: 11px; }
-.rename-dialog { position: fixed; inset: 0; margin: auto; width: 430px; max-width: calc(100vw - 40px); padding: 25px; border: 1px solid #dce3ed; border-radius: 12px; color: #29354a; box-shadow: 0 18px 70px #25324a35; }
+.rename-dialog { position: fixed; inset: 0; margin: auto; width: 430px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); overflow: auto; padding: 25px; border: 1px solid #dce3ed; border-radius: 12px; color: #29354a; box-shadow: 0 18px 70px #25324a35; }
 .rename-dialog::backdrop { background: #25324a55; }
-.rename-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rename-dialog-pdf { width: 1180px; height: min(800px, calc(100vh - 40px)); padding: 0; overflow: hidden; }
+.rename-layout { height: 100%; }
+.rename-dialog-pdf .rename-layout { display: grid; grid-template-columns: minmax(320px, 380px) minmax(0, 1fr); }
+.rename-fields { min-height: 0; }
+.rename-dialog-pdf .rename-fields { display: flex; flex-direction: column; overflow: auto; padding: 25px; }
+.rename-dialog-pdf .rename-dates { flex: 1; min-height: 100px; display: flex; flex-direction: column; }
+.rename-dialog-pdf .rename-date-list { flex: 1; max-height: none; min-height: 0; }
+.rename-preview { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #edf0f5; border-left: 1px solid #dce3ed; }
+.rename-preview-toolbar { display: flex; align-items: center; gap: 6px; padding: 10px; background: #fff; border-bottom: 1px solid #dce3ed; font-size: 11px; color: #66778f; }
+.rename-preview-spacer { flex: 1; }
+.rename-preview-page { flex: 1; min-height: 0; overflow: auto; }
+.rename-preview-page.is-zoomed .pdf-page-surface { padding: var(--zoom-pad-y, 50vh) var(--zoom-pad-x, 50vw); }
+.rename-preview-hint { padding: 10px 14px; margin: 0; font-size: 10px; color: #66778f; background: #fff; border-top: 1px solid #dce3ed; }
+.rename-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: grab; touch-action: none; user-select: none; }
+.rename-dialog.is-dragging .rename-heading { cursor: grabbing; }
 .rename-heading h2 { margin: 0; font-size: 17px; font-weight: 650; }
 .rename-icon { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 8px; color: #356ce5; background: #edf3ff; }
 .rename-current { color: #8896aa; font-size: 11px; overflow-wrap: anywhere; margin-bottom: 20px; }
 .rename-dialog label { display: block; font-size: 12px; font-weight: 600; color: #66778f; margin-bottom: 8px; }
 .rename-dialog input { width: 100%; padding: 10px 12px; border: 1px solid #d7e1ed; border-radius: 6px; font-size: 13px; color: #44536c; }
+.filename-input-wrap { position: relative; }
+.filename-completions { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; list-style: none; margin: 4px 0 0; padding: 4px; max-height: 205px; overflow: auto; background: #fff; border: 1px solid #cbd8eb; border-radius: 6px; box-shadow: 0 8px 24px #25324a25; }
+.filename-completion { padding: 8px; border-radius: 4px; cursor: pointer; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #44536c; overflow-wrap: anywhere; }
+.filename-completion small { font-size: 10px; color: #78879a; }
+.filename-completion[aria-selected="true"] { background: #edf3ff; color: #2b5bb7; }
 .rename-hint { color: #8a98ac; font-size: 10px; margin: 8px 0 20px; }
+.rename-dates { margin-bottom: 20px; }
+.rename-dates h3 { font-size: 12px; color: #66778f; font-weight: 600; }
+.rename-date-message { font-size: 10px; color: #8a98ac; margin: 8px 0; overflow-wrap: anywhere; }
+.rename-date-list { list-style: none; padding: 0; margin: 0; max-height: 180px; overflow: auto; }
+.rename-date-option { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 8px 10px; margin: 3px 0; border: 1px solid #e1e7ef; border-radius: 5px; background: #fafbfd; }
+.rename-date-option code { font-size: 12px; color: #356ce5; }
+.rename-date-option > span { font-size: 10px; color: #78879a; }
+.rename-date-option:hover:enabled, .rename-date-option[aria-pressed="true"] { background: #edf3ff; border-color: #bdcfee; }
+.rename-date-list .rename-date-option { border: 2px solid var(--date-color); background: color-mix(in srgb, var(--date-color) 6%, white); }
+.rename-date-list .rename-date-option[aria-pressed="true"] { background: color-mix(in srgb, var(--date-color) 15%, white); }
+.rename-date-list .rename-date-option code { color: var(--date-color); }
+.rename-date-occurrences { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 10px; }
+.rename-date-occurrences button { font-size: 10px; color: var(--date-color); border: 1px solid var(--date-color); border-radius: 4px; padding: 3px 6px; background: #fff; }
+.rename-date-occurrences button[aria-pressed="true"] { background: color-mix(in srgb, var(--date-color) 15%, white); }
+.pdf-page-frame { position: relative; flex: none; }
+.pdf-page-frame canvas { display: block; }
+.pdf-highlight-text-layer { position: absolute; inset: 0; overflow: clip; opacity: 0; line-height: 1; text-align: initial; letter-spacing: normal; word-spacing: normal; transform-origin: 0 0; pointer-events: none; --scale-round-x: 1px; --scale-round-y: 1px; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.pdf-highlight-text-layer span, .pdf-highlight-text-layer br { position: absolute; white-space: pre; transform-origin: 0 0; }
+.pdf-highlight-text-layer > span { --font-height: 0; --scale-x: 1; --rotate: 0deg; font-size: calc(var(--text-scale-factor) * var(--font-height)); transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.pdf-highlight-text-layer[data-main-rotation="90"] { transform: rotate(90deg) translateY(-100%); }
+.pdf-highlight-text-layer[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
+.pdf-highlight-text-layer[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
+.pdf-date-highlight { position: absolute; border: 2px solid var(--date-color); border-radius: 2px; background: color-mix(in srgb, var(--date-color) 14%, transparent); pointer-events: none; }
+.pdf-date-highlight.is-selected { border-width: 3px; background: color-mix(in srgb, var(--date-color) 22%, transparent); }
+.pdf-date-highlight.is-hovered { border-width: 3px; outline: 3px solid var(--date-color); outline-offset: 4px; box-shadow: 0 0 0 9px #ffffffd9, 0 0 18px 9px color-mix(in srgb, var(--date-color) 35%, transparent); background: color-mix(in srgb, var(--date-color) 35%, transparent); z-index: 2; }
 .rename-dialog .error-message { margin: 12px 0; }
 .rename-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .rename-actions button { padding: 8px 14px; font-size: 12px; }

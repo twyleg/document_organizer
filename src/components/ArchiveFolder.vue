@@ -2,8 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import type { FileEntry } from '../../shared/types'
 import { useFolderDrop } from '../folderDrop'
-const props = defineProps<{ entry: FileEntry; selected: string; canMove: boolean; canDrop: boolean; refreshVersion: number }>()
-const emit = defineEmits<{ select: [path: string]; move: [path: string]; drop: [path: string, event: DragEvent] }>()
+const props = defineProps<{ entry: FileEntry; selected: string; viewedPath?: string; canMove: boolean; canDrop: boolean; refreshVersion: number }>()
+const emit = defineEmits<{ select: [path: string]; open: [entry: FileEntry]; move: [path: string]; drop: [path: string, event: DragEvent] }>()
 const { dropActive, dragOver, dragLeave, drop } = useFolderDrop(() => props.canDrop, event => emit('drop', props.entry.path, event))
 const expanded = ref(false)
 const loaded = ref(false)
@@ -41,13 +41,13 @@ watch(() => props.refreshVersion, () => { if (loaded.value || expanded.value) vo
     <div v-if="entry.isDirectory" class="tree-row" :class="{ selected, 'drop-active': dropActive }" @dragenter="dragOver" @dragover="dragOver" @dragleave="dragLeave" @drop.stop="drop">
       <button class="tree-toggle" :aria-expanded="expanded" :aria-label="`${expanded ? 'Collapse' : 'Expand'} ${entry.name}`" @click="toggle"><i :class="['bi', expanded ? 'bi-chevron-down' : 'bi-chevron-right']" aria-hidden="true" /></button>
       <button class="tree-name" data-archive-entry="folder" :aria-pressed="selected" :title="entry.path" @click="emit('select', entry.path)"><i :class="['bi', expanded ? 'bi-folder2-open' : 'bi-folder2']" aria-hidden="true" /><span>{{ entry.name }}</span><i v-if="entry.isSymbolicLink" class="bi bi-link-45deg" aria-hidden="true" /></button>
-      <button class="move-button" :disabled="!canMove" :aria-label="`Move current document to ${entry.path}`" :title="`Move current document to ${entry.path}`" @click="emit('move', entry.path)">Move</button>
+      <button class="move-button" :disabled="!canMove" :aria-label="`Move selected input document to ${entry.path}`" :title="`Move selected input document to ${entry.path}`" @click="emit('move', entry.path)">Move</button>
     </div>
-    <div v-else class="tree-file" data-archive-entry="file" tabindex="0" :title="entry.path"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /><span>{{ entry.name }}</span><i v-if="entry.isSymbolicLink" class="bi bi-link-45deg" aria-hidden="true" /></div>
+    <div v-else class="tree-file" :class="{ selected: viewedPath === entry.path }" data-archive-entry="file" role="button" :aria-pressed="viewedPath === entry.path" tabindex="0" :title="entry.path" @click="emit('open', entry)"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /><span>{{ entry.name }}</span><i v-if="entry.isSymbolicLink" class="bi bi-link-45deg" aria-hidden="true" /></div>
     <div v-if="expanded" class="tree-children">
       <p v-if="loading && !loaded" class="tree-hint" role="status">Loading folders…</p>
       <p v-else-if="error" class="tree-error" role="alert">{{ error }} <button @click="retry">Retry</button></p>
-      <template v-else><p v-if="skipped" class="tree-hint">{{ skipped }} unavailable item(s).</p><ul v-if="children.length" class="folder-list"><ArchiveFolder v-for="child in children" :key="child.path" :entry="child" :selected="props.selected" :can-move="canMove" :can-drop="canDrop" :refresh-version="refreshVersion" @select="emit('select', $event)" @move="emit('move', $event)" @drop="(path, event) => emit('drop', path, event)" /></ul><p v-else class="tree-hint">Empty folder</p></template>
+      <template v-else><p v-if="skipped" class="tree-hint">{{ skipped }} unavailable item(s).</p><ul v-if="children.length" class="folder-list"><ArchiveFolder v-for="child in children" :key="child.path" :entry="child" :selected="props.selected" :viewed-path="viewedPath" :can-move="canMove" :can-drop="canDrop" :refresh-version="refreshVersion" @select="emit('select', $event)" @open="emit('open', $event)" @move="emit('move', $event)" @drop="(path, event) => emit('drop', path, event)" /></ul><p v-else class="tree-hint">Empty folder</p></template>
     </div>
   </li>
 </template>

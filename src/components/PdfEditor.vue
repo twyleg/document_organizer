@@ -5,7 +5,7 @@ import { getDocument } from '../pdfRendering'
 import type { PdfDocumentData, PdfPageEdit } from '../../shared/types'
 import PdfCanvas from './PdfCanvas.vue'
 
-const props = defineProps<{ path: string; externalBusy?: boolean }>()
+const props = defineProps<{ path: string; externalBusy?: boolean; readOnly?: boolean }>()
 const emit = defineEmits<{
   state: [state: { dirty: boolean; saving: boolean }]
   saved: [metadata: { size: number; modified: number }]
@@ -67,7 +67,7 @@ async function load(data?: PdfDocumentData, keepPage = 0) {
   finally { if (id === request) loading.value = false }
 }
 function rotate(delta: number) {
-  if (!current.value || busy.value) return
+  if (!current.value || busy.value || props.readOnly) return
   current.value.rotation = (current.value.rotation + delta + 360) % 360
   notice.value = ''
 }
@@ -78,13 +78,13 @@ function wheelZoom(event: WheelEvent) {
   zoom.value = Math.min(3, Math.max(.5, zoom.value + (event.deltaY < 0 ? .25 : -.25)))
 }
 function removePage() {
-  if (busy.value || pages.value.length < 2) return
+  if (props.readOnly || busy.value || pages.value.length < 2) return
   pages.value.splice(active.value, 1)
   active.value = Math.min(active.value, pages.value.length - 1)
   notice.value = ''
 }
 function reorder(from: number, insertion: number) {
-  if (busy.value || from < 0 || from >= pages.value.length) return
+  if (props.readOnly || busy.value || from < 0 || from >= pages.value.length) return
   const selectedPage = current.value
   const [page] = pages.value.splice(from, 1)
   pages.value.splice(insertion > from ? insertion - 1 : insertion, 0, page!)
@@ -92,7 +92,7 @@ function reorder(from: number, insertion: number) {
   notice.value = ''
 }
 function startDrag(event: DragEvent, index: number) {
-  if (busy.value || !event.dataTransfer) { event.preventDefault(); return }
+  if (props.readOnly || busy.value || !event.dataTransfer) { event.preventDefault(); return }
   dragged.value = index
   event.dataTransfer.effectAllowed = 'move'
   event.dataTransfer.setData(pageDragType, String(index))
@@ -129,7 +129,7 @@ function drop(event: DragEvent) {
   endDrag()
 }
 async function save() {
-  if (!source || !dirty.value || busy.value) return
+  if (props.readOnly || !source || !dirty.value || busy.value) return
   saving.value = true
   error.value = ''
   notice.value = ''
@@ -167,9 +167,9 @@ onBeforeUnmount(() => {
   <div class="pdf-editor">
     <div class="pdf-edit-toolbar">
       <div class="pdf-toolbar-group"><button class="icon-button" aria-label="Previous PDF page" title="Previous page" :disabled="busy || active <= 0" @click="active--"><i class="bi bi-chevron-left" aria-hidden="true" /></button><span class="pdf-page-count">{{ pages.length ? active + 1 : 0 }} / {{ pages.length }}</span><button class="icon-button" aria-label="Next PDF page" title="Next page" :disabled="busy || active >= pages.length - 1" @click="active++"><i class="bi bi-chevron-right" aria-hidden="true" /></button></div>
-      <div class="pdf-toolbar-group"><button class="icon-button" aria-label="Rotate page counterclockwise" title="Rotate left" :disabled="busy || !current" @click="rotate(-90)"><i class="bi bi-arrow-counterclockwise" aria-hidden="true" /></button><button class="icon-button" aria-label="Rotate page clockwise" title="Rotate right" :disabled="busy || !current" @click="rotate(90)"><i class="bi bi-arrow-clockwise" aria-hidden="true" /></button><button class="icon-button delete-page" aria-label="Delete current PDF page" :title="pages.length < 2 ? 'Keep at least one page' : 'Delete page'" :disabled="busy || pages.length < 2" @click="removePage"><i class="bi bi-trash3" aria-hidden="true" /></button></div>
+      <div v-if="!readOnly" class="pdf-toolbar-group"><button class="icon-button" aria-label="Rotate page counterclockwise" title="Rotate left" :disabled="busy || !current" @click="rotate(-90)"><i class="bi bi-arrow-counterclockwise" aria-hidden="true" /></button><button class="icon-button" aria-label="Rotate page clockwise" title="Rotate right" :disabled="busy || !current" @click="rotate(90)"><i class="bi bi-arrow-clockwise" aria-hidden="true" /></button><button class="icon-button delete-page" aria-label="Delete current PDF page" :title="pages.length < 2 ? 'Keep at least one page' : 'Delete page'" :disabled="busy || pages.length < 2" @click="removePage"><i class="bi bi-trash3" aria-hidden="true" /></button></div>
       <div class="pdf-toolbar-group"><button class="icon-button" aria-label="Zoom out PDF page" :disabled="busy || zoom <= .5" @click="zoom = Math.max(.5, zoom - .25)"><i class="bi bi-dash" aria-hidden="true" /></button><button class="pdf-fit-button" title="Fit page" aria-label="Fit PDF page" :disabled="busy" @click="zoom = 1">{{ Math.round(zoom * 100) }}%</button><button class="icon-button" aria-label="Zoom in PDF page" :disabled="busy || zoom >= 3" @click="zoom = Math.min(3, zoom + .25)"><i class="bi bi-plus" aria-hidden="true" /></button></div>
-      <div class="pdf-save-actions"><button class="pdf-discard" :disabled="busy || !dirty" @click="discard">Discard</button><button class="pdf-save" :disabled="busy || !dirty" @click="save"><i class="bi bi-check2" aria-hidden="true" /> {{ saving ? 'Saving…' : 'Save' }}</button></div>
+      <span v-if="readOnly" class="pdf-page-count">Archive · read only</span><div v-else class="pdf-save-actions"><button class="pdf-discard" :disabled="busy || !dirty" @click="discard">Discard</button><button class="pdf-save" :disabled="busy || !dirty" @click="save"><i class="bi bi-check2" aria-hidden="true" /> {{ saving ? 'Saving…' : 'Save' }}</button></div>
     </div>
     <p v-if="error" class="error-message" role="alert">{{ error }}</p>
     <p v-if="notice" class="pdf-notice" role="status">{{ notice }}</p>
@@ -178,11 +178,11 @@ onBeforeUnmount(() => {
       <PdfCanvas v-else-if="document && current" :document="document" :page="current.index" :rotation="current.rotation" :zoom="zoom" @error="error = $event" />
       <div v-else class="empty-state"><i class="bi bi-file-earmark-pdf" aria-hidden="true" /><h3>Unable to load this PDF</h3><p>Try opening it in its default application.</p></div>
     </div>
-    <div class="pdf-filmstrip-heading"><span>{{ dirty ? 'Unsaved changes · Save or discard before switching or moving' : 'Drag thumbnails to reorder pages' }}</span><span>{{ pages.length }} {{ pages.length === 1 ? 'page' : 'pages' }}</span></div>
+    <div class="pdf-filmstrip-heading"><span>{{ readOnly ? 'Select a thumbnail to inspect the archived document' : dirty ? 'Unsaved changes · Save or discard before switching or moving' : 'Drag thumbnails to reorder pages' }}</span><span>{{ pages.length }} {{ pages.length === 1 ? 'page' : 'pages' }}</span></div>
     <ol class="pdf-filmstrip" aria-label="PDF pages in document order" @dragover.stop="stripDragOver" @drop.stop="drop" @dragleave="dragLeave">
-      <li v-for="(page, index) in pages" :key="page.index" class="pdf-thumbnail" :class="{ active: index === active, dragging: dragged === index, 'insert-before': dropPosition === index, 'insert-after': dropPosition === pages.length && index === pages.length - 1 }" :draggable="!busy" @dragstart.stop="startDrag($event, index)" @dragend="endDrag" @dragover.stop="dragOver($event, index)" @drop.stop="drop" @dragleave="dragLeave">
+      <li v-for="(page, index) in pages" :key="page.index" class="pdf-thumbnail" :class="{ active: index === active, dragging: dragged === index, 'insert-before': dropPosition === index, 'insert-after': dropPosition === pages.length && index === pages.length - 1 }" :draggable="!busy && !readOnly" @dragstart.stop="startDrag($event, index)" @dragend="endDrag" @dragover.stop="dragOver($event, index)" @drop.stop="drop" @dragleave="dragLeave">
         <button class="pdf-thumbnail-select" :disabled="busy" :aria-pressed="index === active" :aria-label="`Show PDF page ${index + 1}, original page ${page.index + 1}`" @click="active = index"><span class="pdf-thumbnail-image"><PdfCanvas v-if="document" :document="document" :page="page.index" :rotation="page.rotation" thumbnail @error="error = $event" /></span><span class="pdf-thumbnail-label">{{ index + 1 }}<span v-if="page.rotation"> · {{ page.rotation }}°</span></span></button>
-        <span class="pdf-thumbnail-order"><button :disabled="busy || index === 0" :aria-label="`Move PDF page ${index + 1} earlier`" title="Move page earlier" @click="reorder(index, index - 1)"><i class="bi bi-chevron-left" aria-hidden="true" /></button><button :disabled="busy || index === pages.length - 1" :aria-label="`Move PDF page ${index + 1} later`" title="Move page later" @click="reorder(index, index + 2)"><i class="bi bi-chevron-right" aria-hidden="true" /></button></span>
+        <span v-if="!readOnly" class="pdf-thumbnail-order"><button :disabled="busy || index === 0" :aria-label="`Move PDF page ${index + 1} earlier`" title="Move page earlier" @click="reorder(index, index - 1)"><i class="bi bi-chevron-left" aria-hidden="true" /></button><button :disabled="busy || index === pages.length - 1" :aria-label="`Move PDF page ${index + 1} later`" title="Move page later" @click="reorder(index, index + 2)"><i class="bi bi-chevron-right" aria-hidden="true" /></button></span>
       </li>
     </ol>
   </div>

@@ -86,11 +86,17 @@ test('detects external changes and serializes simultaneous saves to protect newe
       savePdf(path, current.version, [{ index: 0, rotation: 90 }]),
       savePdf(path, current.version, [{ index: 1, rotation: 180 }])
     ])
-    assert.equal(results[0]!.status, 'fulfilled')
-    assert.equal(results[1]!.status, 'rejected')
+    // Filesystem validation may finish in either order. Exactly one version
+    // must win; the other save must reject rather than overwrite that result.
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+    assert.equal(results.filter(result => result.status === 'rejected').length, 1)
+    const loser = results.find(result => result.status === 'rejected') as PromiseRejectedResult
+    assert.match(String(loser.reason), /changed on disk/)
+    const firstWon = results[0]!.status === 'fulfilled'
     const saved = await PDFDocument.load(await readFile(path))
     assert.equal(saved.getPageCount(), 1)
-    assert.equal(saved.getPage(0).getWidth(), 400)
+    assert.equal(saved.getPage(0).getWidth(), firstWon ? 400 : 410)
+    assert.equal(saved.getPage(0).getRotation().angle, firstWon ? 90 : 180)
     assert.deepEqual(await readdir(root), ['scan.pdf'])
   } finally { await rm(root, { recursive: true, force: true }) }
 })
