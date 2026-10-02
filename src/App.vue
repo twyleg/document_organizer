@@ -5,6 +5,7 @@ import PdfEditor from './components/PdfEditor.vue'
 import RenameDialog from './components/RenameDialog.vue'
 import { documentDragType, useFolderDrop } from './folderDrop'
 import type { DirectoryListing, FileEntry } from '../shared/types'
+import { useInputOcr } from './useInputOcr'
 
 const inbox = ref<DirectoryListing | null>(null)
 const archive = ref<DirectoryListing | null>(null)
@@ -30,8 +31,9 @@ let dragToken = ''
 const preview = ref<{ url: string; kind: 'pdf' | 'image' } | null>(null)
 const previewLoading = ref(false)
 const previewError = ref('')
+const previewRevision = ref(0)
 const editorState = ref({ dirty: false, saving: false })
-const editorLocked = computed(() => editorState.value.dirty || editorState.value.saving)
+const editorLocked = computed(() => editorState.value.dirty || editorState.value.saving || !!ocr.activePath.value)
 const renameEntry = ref<FileEntry | null>(null)
 const available = !!window.files
 let inboxRequest = 0
@@ -41,6 +43,12 @@ let previewRequest = 0
 const files = computed(() => (inbox.value?.entries ?? [])
   .filter(entry => !entry.isDirectory && !entry.name.startsWith('.'))
   .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })))
+const ocr = useInputOcr(files, computed(() => editorState.value.dirty || editorState.value.saving ||
+  moving.value || inboxLoading.value || !!renameEntry.value), (path, data) => {
+  const file = files.value.find(entry => entry.path === path)
+  if (file) Object.assign(file, { size: data.size, modified: data.modified })
+  if (selectedPath.value === path) previewRevision.value++
+})
 const visibleFiles = computed(() => files.value.filter(entry => entry.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
 const archiveEntries = computed(() => (archive.value?.entries ?? []).filter(entry => !entry.name.startsWith('.'))
   .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })))
@@ -74,6 +82,7 @@ async function loadInbox(path: string) {
     if (changed) search.value = ''
     if (changed || !files.value.some(entry => entry.path === selectedPath.value)) selectedPath.value = visibleFiles.value[0]?.path ?? ''
     remember('inbox', result.path)
+    ocr.retryErrors()
   } catch (cause) { if (id === inboxRequest) inboxError.value = message(cause) }
   finally { if (id === inboxRequest) inboxLoading.value = false }
 }
@@ -350,12 +359,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', renameShortcut))
         </div>
         <p v-if="inbox" class="folder-path" :title="inbox.path">{{ inbox.path }}</p>
         <label v-if="inbox" class="search-box"><i class="bi bi-search" aria-hidden="true" /><input v-model="search" type="search" placeholder="Find a document…" aria-label="Filter input documents" /></label>
+        <p v-if="ocr.activePath.value" class="tree-hint" role="status">Adding searchable text to {{ folderName(ocr.activePath.value) }}…</p>
         <p v-if="inboxError" class="error-message" role="alert">{{ inboxError }}</p>
         <p v-if="inbox?.skipped" class="warning-message">{{ inbox.skipped }} unavailable item(s) could not be read.</p>
         <div class="panel-content" :aria-busy="inboxLoading">
           <div v-if="inboxLoading" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Reading input folder…</p></div>
           <ul v-else-if="visibleFiles.length" ref="inputList" class="document-list" aria-label="Input files" @keydown="navigateInput">
-            <li v-for="(entry, index) in visibleFiles" :key="entry.path"><button class="document-row" :tabindex="entry.path === selectedPath || (selectedIndex < 0 && index === 0) ? 0 : -1" :disabled="editorLocked || moving" :draggable="!editorLocked && !moving && !inboxLoading && !archiveLoading" :class="{ selected: entry.path === selectedPath, dragging: entry.path === draggedPath }" @dragstart="startDrag($event, entry.path)" @dragend="endDrag" :aria-pressed="entry.path === selectedPath" :title="entry.name" @click="selectDocument(entry.path)"><span class="file-icon"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /></span><span class="file-details"><span class="file-title">{{ entry.name }}</span><span class="file-meta">{{ size(entry.size) }} · {{ date.format(entry.modified) }}</span></span></button></li>
+            <li v-for="(entry, index) in visibleFiles" :key="entry.path"><button class="document-row" :tabindex="entry.path === selectedPath || (selectedIndex < 0 && index === 0) ? 0 : -1" :disabled="editorLocked || moving" :draggable="!editorLocked && !moving && !inboxLoading && !archiveLoading" :class="{ selected: entry.path === selectedPath, dragging: entry.path === draggedPath }" @dragstart="startDrag($event, entry.path)" @dragend="endDrag" :aria-pressed="entry.path === selectedPath" :title="entry.name" @click="selectDocument(entry.path)"><span class="file-icon"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /></span><span class="file-details"><span class="file-title">{{ entry.name }}</span><span class="file-meta">{{ size(entry.size) }} · {{ date.format(entry.modified) }}</span><span v-if="/\.pdf$/i.test(entry.name)" class="ocr-status" :class="ocr.statuses.value[entry.path]?.phase" :title="ocr.statuses.value[entry.path]?.detail">{{ ocr.statuses.value[entry.path]?.label ?? 'Text check queued' }}</span></span></button></li>
           </ul>
           <div v-else class="empty-state"><i class="bi bi-inbox" aria-hidden="true" /><h3>{{ !inbox ? 'Start with your scans' : search ? 'No matching documents' : 'Input folder is empty' }}</h3><p>{{ !inbox ? 'Choose the folder where your new scans arrive.' : search ? 'Try a different filename.' : 'New scans will appear here when you refresh.' }}</p></div>
         </div>
@@ -386,7 +396,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', renameShortcut))
         <p v-if="previewError" class="error-message" role="alert">{{ previewError }}</p>
         <div class="preview-canvas" :aria-busy="previewLoading">
           <div v-if="previewLoading" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Loading document…</p></div>
-          <PdfEditor v-else-if="preview?.kind === 'pdf' && selected" :key="preview.url" :path="selected.path" @state="editorState = $event" @saved="pdfSaved" />
+          <PdfEditor v-else-if="preview?.kind === 'pdf' && selected" :key="`${preview.url}-${previewRevision}`" :path="selected.path" :external-busy="!!ocr.activePath.value" @state="editorState = $event" @saved="pdfSaved" />
           <div v-else-if="preview?.kind === 'image'" class="image-viewer"><img :src="preview.url" :alt="selected?.name" @error="previewError = 'This image could not be displayed. Try opening it in its default application.'" /></div>
           <div v-else class="empty-state"><span class="preview-placeholder"><i class="bi bi-file-earmark-text" aria-hidden="true" /></span><h3>{{ selected ? 'Preview unavailable' : 'Take a closer look' }}</h3><p>{{ selected ? 'Use the open button above to view this document in its default application.' : 'Select an input document to view it here. PDFs and scanned images are supported.' }}</p><span v-if="!selected" class="format-label">PDF · PNG · JPEG · GIF · WebP · BMP</span></div>
         </div>

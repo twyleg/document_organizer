@@ -6,6 +6,7 @@ import { stat } from 'node:fs/promises'
 import { listDirectory, moveFile, previewFile, renameFile, validatePath } from './filesystem'
 import type { Location } from '../shared/types'
 import { readPdf, savePdf } from './pdf'
+import { ocrPdf } from './ocr'
 
 let window: BrowserWindow | null = null
 let activePreview: { route: string; path: string; mime: string } | null = null
@@ -44,6 +45,7 @@ function registerHandlers() {
     return path
   })
   handle('pdf:read', readPdf)
+  handle('pdf:ocr', (path, version) => ocrPdf(path, version))
   handle('pdf:save', savePdf)
   handle('files:move', async (source: unknown, folder: unknown) => {
     activePreview = null

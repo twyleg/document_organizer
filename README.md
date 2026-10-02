@@ -25,9 +25,29 @@ The input list includes files directly in the selected directory, without recurs
 
 Moving never overwrites an existing destination file. A name conflict displays an error and leaves the input document in place. Moves also work across drives. Source symbolic links cannot be moved. If the destination copy succeeds but removing the source fails, both copies are kept and an error explains the outcome. The intended naming convention remains `YYYYMMDD_SENDER-SUBJECT.pdf`, for example `20260301_ADAC-Beitragsrechnung.pdf`, with an archive destination such as `archive/Fahrzeuge/FAHRZEUGNAME/Versicherungen/ADAC/`.
 
-OCR, extracted dates/senders/subjects, and filename and destination suggestions are future steps. Manual filing is available through drag and drop or the folder Move buttons.
+Extracted dates/senders/subjects and filename and destination suggestions are future steps. Manual filing is available through drag and drop or the folder Move buttons.
 
 In the archive tree, focus a file and press **Ctrl+Shift+Left** to return it to the input folder. The returned file becomes selected in the input list with its preview displayed. Folders are not moved, and existing input files are never overwritten. Save or discard PDF edits before moving files in either direction.
+
+## Automatic OCR
+
+Every input PDF is checked in the background, page by page, for embedded text. The input list shows its status; hover over the status for page coverage or an error explanation. Text may come from OCR or from an originally digital document: its presence does not prove that OCR was previously run or that the text is accurate.
+
+If any page has no embedded text, the application automatically runs local OCRmyPDF with German and English recognition (`deu+eng`). Pages that already contain text are skipped. PDFs with text on every page are left unchanged. Blank pages may still have no text after OCR; the status reports the remaining pages rather than repeatedly processing them. Images and other non-PDF input files are not processed.
+
+OCR runs one document at a time. It waits for unsaved PDF edits to be saved or discarded. While OCR runs, editing, renaming, moving files, and changing folders are temporarily disabled; viewing the current PDF remains available. The result retains its filename and replaces the source only after successful processing, PDF validation, and a check that the source has not changed. Failed OCR keeps the original. Password-protected, damaged, or signed PDFs may be unavailable for OCR; errors appear in their status. Refresh the input folder to retry failures after fixing their cause. The selected PDF preview reloads after OCR.
+
+Install **OCRmyPDF**, **Tesseract**, and the **German and English language data**. Nothing is uploaded to an online OCR service. See the [official installation instructions](https://ocrmypdf.readthedocs.io/en/stable/installation.html).
+
+On Arch Linux, install the system OCR engine and language data, then use the project virtual environment for OCRmyPDF:
+
+```sh
+sudo pacman -S --needed tesseract tesseract-data-deu tesseract-data-eng
+python3 -m venv .venv-ocr
+.venv-ocr/bin/pip install 'ocrmypdf>=16,<18'
+```
+
+The application uses `.venv-ocr/bin/ocrmypdf` when present, otherwise `ocrmypdf` on PATH. Set `DOCUMENT_ORGANIZER_OCRMYPDF` to an executable path for another installation. On Debian/Ubuntu, install `ocrmypdf tesseract-ocr-deu tesseract-ocr-eng` with apt instead. Restart the application after changing its PATH.
 
 ## Renaming documents
 

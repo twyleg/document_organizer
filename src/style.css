@@ -42,6 +42,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #356ce5; outline-
 .file-title { font-size: 12px; color: #44536c; overflow-wrap: anywhere; line-height: 1.5; }
 .selected .file-title { color: #2b5bb7; }
 .file-meta { color: #8b98ac; font-size: 10px; }
+.ocr-status { font-size: 10px; color: #78879a; }
+.ocr-status.ready { color: #31734e; }
+.ocr-status.ocr, .ocr-status.checking { color: #356ce5; }
+.ocr-status.partial, .ocr-status.empty { color: #916516; }
+.ocr-status.error { color: #a33e46; }
 .archive-tree { margin-top: 17px; padding: 0 10px 16px; }
 .folder-list { list-style: none; padding: 0; margin: 0; }
 .tree-root { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 0; background: #f6f8fb; color: #4c5c73; width: 100%; text-align: left; border-radius: 5px; margin-bottom: 6px; font-weight: 600; font-size: 12px; }

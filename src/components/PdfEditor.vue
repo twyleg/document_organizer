@@ -5,7 +5,7 @@ import { getDocument } from '../pdfRendering'
 import type { PdfDocumentData, PdfPageEdit } from '../../shared/types'
 import PdfCanvas from './PdfCanvas.vue'
 
-const props = defineProps<{ path: string }>()
+const props = defineProps<{ path: string; externalBusy?: boolean }>()
 const emit = defineEmits<{
   state: [state: { dirty: boolean; saving: boolean }]
   saved: [metadata: { size: number; modified: number }]
@@ -28,7 +28,7 @@ let request = 0
 const pageDragType = 'application/x-document-organizer-pdf-page'
 const dirty = computed(() => pages.value.length !== originalCount.value || pages.value.some((page, index) => page.index !== index || page.rotation !== 0))
 const current = computed(() => pages.value[active.value])
-const busy = computed(() => loading.value || saving.value)
+const busy = computed(() => loading.value || saving.value || props.externalBusy)
 watch([dirty, saving], () => emit('state', { dirty: dirty.value, saving: saving.value }), { immediate: true })
 
 function message(cause: unknown) {

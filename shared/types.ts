@@ -41,5 +41,6 @@ export interface FileBrowserAPI {
   moveFile(source: string, destinationFolder: string): Promise<string>
   renameFile(source: string, name: string): Promise<string>
   readPdf(path: string): Promise<PdfDocumentData>
+  ocrPdf(path: string, version: string): Promise<PdfDocumentData>
   savePdf(path: string, version: string, pages: PdfPageEdit[]): Promise<PdfDocumentData>
 }

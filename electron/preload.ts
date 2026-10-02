@@ -10,6 +10,7 @@ const api: FileBrowserAPI = {
   moveFile: (source, folder) => ipcRenderer.invoke('files:move', source, folder),
   renameFile: (source, name) => ipcRenderer.invoke('files:rename', source, name),
   readPdf: (path) => ipcRenderer.invoke('pdf:read', path),
+  ocrPdf: (path, version) => ipcRenderer.invoke('pdf:ocr', path, version),
   savePdf: (path, version, pages) => ipcRenderer.invoke('pdf:save', path, version, pages)
 }
 contextBridge.exposeInMainWorld('files', api)

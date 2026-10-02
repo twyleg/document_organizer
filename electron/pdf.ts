@@ -84,8 +84,12 @@ async function writePdf(path: string, version: unknown, edits: unknown): Promise
 
 export async function savePdf(value: unknown, version: unknown, pages: unknown): Promise<PdfDocumentData> {
   const path = await pdfPath(value)
+  return withPdfWrite(path, () => writePdf(path, version, pages))
+}
+
+export async function withPdfWrite<T>(path: string, write: () => Promise<T>): Promise<T> {
   const prior = saves.get(path) ?? Promise.resolve()
-  const task = prior.catch(() => {}).then(() => writePdf(path, version, pages))
+  const task = prior.catch(() => {}).then(write)
   saves.set(path, task)
   try { return await task }
   finally { if (saves.get(path) === task) saves.delete(path) }
