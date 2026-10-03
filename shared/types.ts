@@ -5,6 +5,7 @@ export interface FileEntry {
   isSymbolicLink: boolean
   size: number
   modified: number
+  transferPending?: boolean
 }
 
 export interface DirectoryListing {
@@ -33,8 +34,13 @@ export interface PdfDocumentData {
 }
 
 export interface FileBrowserAPI {
+  archiveContextMenu(root: string, path: string): Promise<'create' | 'rename' | 'delete' | null>
+  createArchiveFolder(root: string, parent: string, name: string): Promise<string>
+  renameArchiveEntry(root: string, path: string, name: string): Promise<string>
+  deleteArchiveEntry(root: string, path: string): Promise<void>
   locations(): Promise<Location[]>
   listDirectory(path: string): Promise<DirectoryListing>
+  listInputDirectory(path: string): Promise<DirectoryListing>
   chooseDirectory(): Promise<string | null>
   openFile(path: string): Promise<void>
   previewFile(path: string): Promise<{ url: string; kind: 'pdf' | 'image' }>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { basename, join, parse } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -7,6 +7,10 @@ import { listDirectory, moveFile, previewFile, renameFile, validatePath } from '
 import type { Location } from '../shared/types'
 import { readPdf, savePdf } from './pdf'
 import { ocrPdf } from './ocr'
+import { InputDirectoryReader } from './inputDirectory'
+import { archiveEntry, createArchiveFolder, renameArchiveEntry, trashArchiveEntry } from './archive'
+
+const inputDirectory = new InputDirectoryReader()
 
 let window: BrowserWindow | null = null
 let activePreview: { route: string; path: string; mime: string } | null = null
@@ -38,19 +42,46 @@ function registerHandlers() {
     { name: 'File system', path: parse(app.getPath('home')).root, icon: 'hdd' }
   ])
   handle('files:list', listDirectory)
+  handle('archive:menu', async (root, path) => {
+    const entry = await archiveEntry(root, path, true)
+    return new Promise(resolve => {
+      let action: 'create' | 'rename' | 'delete' | null = null
+      Menu.buildFromTemplate([
+        { label: 'New folder…', enabled: entry.isDirectory, click: () => { action = 'create' } },
+        { label: 'Rename…', enabled: entry.path !== entry.root, click: () => { action = 'rename' } },
+        { type: 'separator' },
+        { label: 'Delete…', enabled: entry.path !== entry.root, click: () => { action = 'delete' } }
+      ]).popup({ window: window!, callback: () => resolve(action) })
+    })
+  })
+  handle('archive:create', createArchiveFolder)
+  handle('archive:rename', renameArchiveEntry)
+  handle('archive:delete', (root, path) => trashArchiveEntry(root, path, target => shell.trashItem(target)))
+  handle('files:input', (path) => inputDirectory.read(path))
   handle('files:rename', async (source: unknown, name: unknown) => {
     const path = await renameFile(source, name)
+    await inputDirectory.acknowledge(path).catch(() => {})
     activePreview = null
     previewGeneration++
     return path
   })
   handle('pdf:read', readPdf)
-  handle('pdf:ocr', (path, version) => ocrPdf(path, version))
-  handle('pdf:save', savePdf)
+  handle('pdf:ocr', async (path, version) => {
+    const data = await ocrPdf(path, version)
+    await inputDirectory.acknowledge(path, data).catch(() => {})
+    return data
+  })
+  handle('pdf:save', async (path, version, pages) => {
+    const data = await savePdf(path, version, pages)
+    await inputDirectory.acknowledge(path, data).catch(() => {})
+    return data
+  })
   handle('files:move', async (source: unknown, folder: unknown) => {
     activePreview = null
     previewGeneration++
-    return moveFile(source, folder)
+    const path = await moveFile(source, folder)
+    await inputDirectory.acknowledge(path).catch(() => {})
+    return path
   })
   handle('files:preview', async (value: unknown) => {
     const generation = ++previewGeneration
@@ -79,7 +110,9 @@ async function createWindow() {
     title: 'Document Organizer', backgroundColor: '#f8fafc', autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
-      contextIsolation: true, nodeIntegration: false, sandbox: true, plugins: true
+      contextIsolation: true, nodeIntegration: false, sandbox: true, plugins: true,
+      // Scanner arrivals and the OCR queue must keep running when minimized.
+      backgroundThrottling: false
     }
   })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

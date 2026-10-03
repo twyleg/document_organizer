@@ -4,6 +4,7 @@ import { extractPdfText } from './pdfText'
 
 interface TextStatus {
   key: string
+  version?: string
   phase: 'checking' | 'queued' | 'ocr' | 'ready' | 'partial' | 'empty' | 'error'
   label: string
   detail: string
@@ -11,9 +12,10 @@ interface TextStatus {
 
 const keyOf = (file: FileEntry) => `${file.path}\0${file.size}\0${file.modified}`
 
-export function useInputOcr(files: Ref<FileEntry[]>, paused: Ref<boolean>, saved: (path: string, data: PdfDocumentData) => void) {
+export function useInputOcr(files: Ref<FileEntry[]>, paused: Ref<boolean>, blockedPaths: Ref<Set<string>>, saved: (path: string, data: PdfDocumentData) => void) {
   const statuses = ref<Record<string, TextStatus>>({})
   const activePath = ref('')
+  const renamedStatuses = new Map<string, TextStatus>()
   let running = false
   let disposed = false
   let cancelCheck: (() => void) | undefined
@@ -29,26 +31,34 @@ export function useInputOcr(files: Ref<FileEntry[]>, paused: Ref<boolean>, saved
     running = true
     try {
       while (!disposed && !paused.value) {
-        const entry = files.value.find(file => /\.pdf$/i.test(file.name) &&
+        const entry = files.value.find(file => /\.pdf$/i.test(file.name) && !file.transferPending && !blockedPaths.value.has(file.path) &&
           (statuses.value[file.path]?.key !== keyOf(file) || statuses.value[file.path]?.phase === 'queued'))
         if (!entry) break
         const key = keyOf(entry)
         let statusKey = key
-        const current = () => files.value.find(file => file.path === entry.path && keyOf(file) === statusKey)
+        let version: string | undefined
+        const current = () => files.value.find(file => file.path === entry.path && !file.transferPending && keyOf(file) === statusKey)
         const set = (phase: TextStatus['phase'], label: string, detail: string) => {
-          statuses.value[entry.path] = { key: statusKey, phase, label, detail }
+          statuses.value[entry.path] = { key: statusKey, version, phase, label, detail }
         }
         set('checking', 'Checking text…', 'Checking every PDF page for embedded text.')
+        activePath.value = entry.path
         try {
           const source = await window.files.readPdf(entry.path)
+          version = source.version
           let coverage = await inspect(source)
           if (disposed || !current()) continue
           let result = source
           if (coverage.missing.length) {
-            if (paused.value) { set('queued', 'OCR queued', 'OCR will start after the current edit or file operation finishes.'); break }
+            if (paused.value || blockedPaths.value.has(entry.path)) {
+              set('queued', 'OCR queued', 'OCR will start after the current edit or file operation finishes.')
+              if (paused.value) break
+              continue
+            }
             set('ocr', 'Running OCR…', 'Adding searchable German and English text to pages without embedded text.')
             activePath.value = entry.path
             result = await window.files.ocrPdf(entry.path, source.version)
+            version = result.version
             if (disposed) break
             saved(entry.path, result)
             statusKey = keyOf({ ...entry, size: result.size, modified: result.modified })
@@ -67,7 +77,13 @@ export function useInputOcr(files: Ref<FileEntry[]>, paused: Ref<boolean>, saved
       }
     } finally { running = false }
   }
-  watch([() => files.value.map(keyOf).join('\n'), paused], () => {
+  watch([() => files.value.map(file => `${keyOf(file)}\0${!!file.transferPending}`).join('\n'), paused, () => [...blockedPaths.value].join('\n')], () => {
+    for (const file of files.value) {
+      const transferred = renamedStatuses.get(file.path)
+      if (!transferred) continue
+      if (transferred.key === keyOf(file)) statuses.value[file.path] = transferred
+      renamedStatuses.delete(file.path)
+    }
     const paths = new Set(files.value.map(file => file.path))
     for (const path of Object.keys(statuses.value)) if (!paths.has(path)) delete statuses.value[path]
     void pump()
@@ -77,5 +93,18 @@ export function useInputOcr(files: Ref<FileEntry[]>, paused: Ref<boolean>, saved
     for (const [path, status] of Object.entries(statuses.value)) if (status.phase === 'error') delete statuses.value[path]
     void pump()
   }
-  return { statuses, activePath, retryErrors }
+  async function carryRename(source: FileEntry, path: string) {
+    const status = statuses.value[source.path]
+    if (!/\.pdf$/i.test(path) || status?.key !== keyOf(source) || !status.version ||
+        !['ready', 'partial', 'empty'].includes(status.phase)) return
+    try {
+      // Renaming uses a copy and changes the modification time. Retain completed
+      // recognition only when the renamed PDF still has the same contents.
+      const data = await window.files.readPdf(path)
+      if (data.version === status.version) {
+        renamedStatuses.set(path, { ...status, key: keyOf({ ...source, path, size: data.size, modified: data.modified }) })
+      }
+    } catch { /* The normal input refresh will report or recheck an unreadable file. */ }
+  }
+  return { statuses, activePath, retryErrors, carryRename }
 }

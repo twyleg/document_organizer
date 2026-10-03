@@ -8,64 +8,19 @@ import PdfCanvas from './PdfCanvas.vue'
 import type { PdfTextHighlight } from '../pdfHighlights'
 import { buildFilenameWords, filenameCompletions, type FilenameWord } from '../filenameCompletion'
 
-const props = defineProps<{ entry: FileEntry }>()
-const emit = defineEmits<{ cancel: []; renamed: [path: string] }>()
-const dialog = ref<HTMLDialogElement>()
+const props = defineProps<{ entry: FileEntry; preview?: { url: string; kind: 'pdf' | 'image' } | null }>()
+const emit = defineEmits<{ cancel: []; renamed: [path: string]; busy: [value: boolean] }>()
+const panel = ref<HTMLElement>()
 const input = ref<HTMLInputElement>()
-const position = ref<{ left: number; top: number }>()
-const dragging = ref(false)
-let drag: { pointerId: number; x: number; y: number; left: number; top: number } | undefined
-let dialogObserver: ResizeObserver | undefined
-const positionStyle = computed(() => position.value ? {
-  left: `${position.value.left}px`, top: `${position.value.top}px`, right: 'auto', bottom: 'auto', margin: '0',
-} : undefined)
-function moveDialog(left: number, top: number) {
-  const box = dialog.value?.getBoundingClientRect()
-  if (!box) return
-  const margin = 8
-  position.value = {
-    left: Math.max(margin, Math.min(left, window.innerWidth - box.width - margin)),
-    top: Math.max(margin, Math.min(top, window.innerHeight - box.height - margin)),
-  }
-}
-function keepDialogInWindow() {
-  if (position.value) moveDialog(position.value.left, position.value.top)
-}
-function startDrag(event: PointerEvent) {
-  if (!event.isPrimary || event.button !== 0) return
-  const box = dialog.value?.getBoundingClientRect()
-  if (!box) return
-  event.preventDefault()
-  const handle = event.currentTarget as HTMLElement
-  handle.setPointerCapture(event.pointerId)
-  drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: box.left, top: box.top }
-  dragging.value = true
-  window.addEventListener('pointermove', moveDrag)
-  window.addEventListener('pointerup', endDrag)
-  window.addEventListener('pointercancel', endDrag)
-  window.addEventListener('blur', stopDrag)
-}
-function moveDrag(event: PointerEvent) {
-  if (!drag || event.pointerId !== drag.pointerId) return
-  moveDialog(drag.left + event.clientX - drag.x, drag.top + event.clientY - drag.y)
-}
-function endDrag(event: PointerEvent) {
-  if (event.pointerId !== drag?.pointerId) return
-  stopDrag()
-}
-function stopDrag() {
-  drag = undefined
-  dragging.value = false
-  window.removeEventListener('pointermove', moveDrag)
-  window.removeEventListener('pointerup', endDrag)
-  window.removeEventListener('pointercancel', endDrag)
-  window.removeEventListener('blur', stopDrag)
-}
 const name = ref(props.entry.name)
 const saving = ref(false)
 const error = ref('')
 const dates = ref<DateSuggestion[]>([])
 const datesLoading = ref(/\.pdf$/i.test(props.entry.name))
+const dateStage = ref<'loading' | 'dates' | 'filename'>(datesLoading.value ? 'loading' : 'filename')
+const dateIndex = ref(0)
+const extension = props.entry.name.lastIndexOf('.')
+const fileExtension = extension > 0 ? props.entry.name.slice(extension) : ''
 const datesError = ref('')
 const pdf = shallowRef<PDFDocumentProxy>()
 const page = ref(0)
@@ -104,15 +59,16 @@ async function acceptCompletion(index = completionIndex.value) {
   updateCaret()
 }
 function completionKey(event: KeyboardEvent) {
+  if (event.key === 'Enter' && (event.repeat || event.isComposing)) { event.preventDefault(); return }
   updateCaret()
   if (!completionOpen.value || event.ctrlKey || event.altKey || event.metaKey) return
-  if (event.key === 'Tab' && !event.shiftKey) {
+  if ((event.key === 'Tab' && !event.shiftKey) || event.key === 'Enter') {
     event.preventDefault()
     void acceptCompletion()
   } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
     completionIndex.value = (completionIndex.value + (event.key === 'ArrowDown' ? 1 : -1) + completions.value.length) % completions.value.length
-    void nextTick(() => dialog.value?.querySelector('.filename-completion[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }))
+    void nextTick(() => panel.value?.querySelector('.filename-completion[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }))
   } else if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
@@ -166,19 +122,67 @@ async function loadDates() {
       dates.value = findDocumentDates(text.pages)
       words.value = buildFilenameWords(text.pages)
       const first = dates.value[0]?.evidence[0]
-      if (first) { page.value = first.page - 1; selectedOccurrence.value = occurrenceId(first) }
+      if (first) {
+        name.value = dates.value[0]!.prefix + fileExtension
+        dateStage.value = 'dates'
+        datesLoading.value = false
+        page.value = first.page - 1
+        selectedOccurrence.value = occurrenceId(first)
+        if (dates.value.length === 1) await usePrefix(dates.value[0]!.prefix)
+        else {
+          await nextTick()
+          if (!disposed) panel.value?.querySelector<HTMLButtonElement>('.rename-date-option')?.focus()
+        }
+      }
     }
   } catch (cause) {
     if (!disposed) datesError.value = cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause)
-  } finally { datesLoading.value = false }
+  } finally {
+    datesLoading.value = false
+    if (!disposed && dateStage.value === 'loading') {
+      dateStage.value = 'filename'
+      await focusFilename(true)
+    }
+  }
+}
+async function focusFilename(selectStem = false) {
+  await nextTick()
+  if (disposed) return
+  input.value?.focus()
+  if (selectStem) {
+    const end = name.value.lastIndexOf('.')
+    input.value?.setSelectionRange(0, end > 0 ? end : name.value.length)
+  }
+  updateCaret()
+}
+function dateKey(event: KeyboardEvent) {
+  if (!['ArrowUp', 'ArrowDown', 'Enter'].includes(event.key) || event.ctrlKey || event.altKey || event.metaKey) return
+  if (!(event.target instanceof Element) || !event.target.closest('.rename-date-option')) return
+  event.preventDefault()
+  if (event.key === 'Enter') {
+    if (!event.repeat) void usePrefix(dates.value[dateIndex.value]!.prefix)
+    return
+  }
+  dateIndex.value = (dateIndex.value + (event.key === 'ArrowDown' ? 1 : -1) + dates.value.length) % dates.value.length
+  const date = dates.value[dateIndex.value]!
+  name.value = date.prefix + name.value.replace(/^\d{8}_/, '')
+  const evidence = date.evidence[0]!
+  page.value = evidence.page - 1
+  selectedOccurrence.value = occurrenceId(evidence)
+  void nextTick(() => {
+    const button = panel.value?.querySelectorAll<HTMLButtonElement>('.rename-date-option')[dateIndex.value]
+    button?.focus({ preventScroll: true })
+    button?.scrollIntoView({ block: 'nearest' })
+  })
 }
 async function usePrefix(prefix: string, evidence = dates.value.find(date => date.prefix === prefix)?.evidence[0]) {
   if (evidence) { page.value = evidence.page - 1; selectedOccurrence.value = occurrenceId(evidence) }
   name.value = prefix + name.value.replace(/^\d{8}_/, '')
+  dateStage.value = 'filename'
   await nextTick()
   input.value?.focus()
   const extension = name.value.lastIndexOf('.')
-  input.value?.setSelectionRange(prefix.length, extension > prefix.length ? extension : name.value.length)
+  input.value?.setSelectionRange(prefix.length, extension >= prefix.length ? extension : name.value.length)
   completionDismissed.value = true
   updateCaret()
 }
@@ -240,63 +244,56 @@ function cancel(event?: Event) {
   if (!saving.value) emit('cancel')
 }
 async function apply() {
-  if (saving.value) return
+  if (saving.value || dateStage.value === 'loading') return
+  if (dateStage.value === 'dates') { await usePrefix(dates.value[dateIndex.value]!.prefix); return }
+  if (completionOpen.value) { await acceptCompletion(); return }
   saving.value = true
+  emit('busy', true)
   error.value = ''
   try { emit('renamed', await window.files.renameFile(props.entry.path, name.value)) }
   catch (cause) {
     error.value = cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause)
     saving.value = false
+    emit('busy', false)
     await nextTick()
     input.value?.focus()
   }
 }
 onMounted(async () => {
-  dialog.value?.showModal()
-  window.addEventListener('resize', keepDialogInWindow)
-  dialogObserver = new ResizeObserver(keepDialogInWindow)
-  if (dialog.value) dialogObserver.observe(dialog.value)
-  void loadDates()
-  await nextTick()
-  input.value?.focus()
-  const extension = name.value.lastIndexOf('.')
-  input.value?.setSelectionRange(0, extension > 0 ? extension : name.value.length)
-  updateCaret()
+  if (isPdf) { panel.value?.focus(); void loadDates() }
+  else await focusFilename(true)
 })
 onBeforeUnmount(() => {
+  emit('busy', false)
   disposed = true
-  stopDrag()
-  window.removeEventListener('resize', keepDialogInWindow)
-  dialogObserver?.disconnect()
   void textTask?.destroy()
-  dialog.value?.close()
 })
 </script>
 
 <template>
-  <dialog ref="dialog" class="rename-dialog" :class="{ 'rename-dialog-pdf': isPdf, 'is-dragging': dragging }" :style="positionStyle" aria-labelledby="rename-title" @cancel="cancel">
+  <div ref="panel" class="rename-panel" tabindex="-1" aria-labelledby="rename-title" @keydown.esc="cancel" @keydown.stop>
     <form class="rename-layout" @submit.prevent="apply">
       <div class="rename-fields">
-      <div class="rename-heading" title="Drag to move this dialog" @pointerdown="startDrag" @lostpointercapture="endDrag"><span class="rename-icon"><i class="bi bi-pencil" aria-hidden="true" /></span><h2 id="rename-title">Rename document</h2></div>
+      <div class="rename-heading"><span class="rename-icon"><i class="bi bi-pencil" aria-hidden="true" /></span><h2 id="rename-title">Rename document</h2></div>
       <p class="rename-current" :title="entry.name">{{ entry.name }}</p>
       <label for="rename-name">New filename</label>
       <div class="filename-input-wrap">
-        <input id="rename-name" ref="input" v-model="name" type="text" :disabled="saving" required autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" :aria-expanded="completionOpen" aria-controls="filename-completions" :aria-activedescendant="completionOpen ? `filename-completion-${completionIndex}` : undefined" :aria-invalid="!!error" :aria-describedby="error ? 'rename-error' : 'rename-hint'" @input="updateCaret(true)" @select="updateCaret()" @click="updateCaret(true)" @keyup="updateCaret()" @focus="completionFocused = true" @blur="completionFocused = false" @keydown="completionKey" />
+        <input id="rename-name" ref="input" v-model="name" type="text" :disabled="saving || dateStage === 'loading'" required autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" :aria-expanded="completionOpen" aria-controls="filename-completions" :aria-activedescendant="completionOpen ? `filename-completion-${completionIndex}` : undefined" :aria-invalid="!!error" :aria-describedby="error ? 'rename-error' : 'rename-hint'" @input="updateCaret(true)" @select="updateCaret()" @click="updateCaret(true)" @keyup="updateCaret()" @focus="completionFocused = true; dateStage = 'filename'" @blur="completionFocused = false" @keydown="completionKey" />
         <ul v-if="completionOpen" id="filename-completions" class="filename-completions" role="listbox" aria-label="Completions from document text">
           <li v-for="(completion, index) in completions" :id="`filename-completion-${index}`" :key="completion.value" class="filename-completion" role="option" :aria-selected="index === completionIndex" @mousedown.prevent @mouseenter="completionIndex = index" @click="acceptCompletion(index)"><span>{{ completion.label }}</span><small>{{ completion.filename }}</small></li>
         </ul>
       </div>
-      <p id="rename-hint" class="rename-hint">Tab to complete · ↑/↓ to choose · Enter to rename · Esc to cancel</p>
+      <p id="rename-hint" class="rename-hint">↑/↓ to choose · Enter to accept suggestion or rename · Tab also completes · Esc to dismiss or cancel</p>
       <section v-if="isPdf" class="rename-dates" aria-labelledby="rename-dates-title">
         <h3 id="rename-dates-title">Date prefixes from this document</h3>
         <p v-if="datesLoading" class="rename-date-message" role="status">Finding dates…</p>
         <p v-else-if="datesError" class="rename-date-message">Date suggestions unavailable: {{ datesError }}</p>
         <p v-else-if="!dates.length" class="rename-date-message">No complete dates found in the embedded text.</p>
         <template v-else>
-          <p class="rename-date-message">Choose a prefix; the filename and extension are kept. Ambiguous numeric dates show both interpretations.</p>
-          <ul class="rename-date-list" aria-label="Recommended date prefixes">
-            <li v-for="date in dates" :key="date.prefix" :style="{ '--date-color': dateColors.get(date.prefix) }">
-              <button type="button" class="rename-date-option" :disabled="saving" :aria-pressed="name.startsWith(date.prefix)" :title="date.evidence.map(item => `Page ${item.page}: ${item.context}`).join('\n')" @mouseenter="hoverDate(date)" @mouseleave="hoveredOccurrence = ''" @focus="hoverDate(date)" @blur="hoveredOccurrence = ''" @click="usePrefix(date.prefix)">
+          <p class="rename-date-message">↑/↓ to choose a date · Enter to confirm and edit the filename. The extension is kept. Ambiguous dates show both interpretations.</p>
+          <ul class="rename-date-list" aria-label="Recommended date prefixes" @keydown="dateKey">
+            <li v-for="(date, index) in dates" :key="date.prefix" :style="{ '--date-color': dateColors.get(date.prefix) }">
+              <button type="button" class="rename-date-option" :disabled="saving" :aria-pressed="name.startsWith(date.prefix)" :title="date.evidence.map(item => `Page ${item.page}: ${item.context}`).join('\n')" @mouseenter="hoverDate(date)" @mouseleave="hoveredOccurrence = ''" @focus="dateIndex = index; dateStage = 'dates'; hoverDate(date)" @blur="hoveredOccurrence = ''" @click="usePrefix(date.prefix)">
                 <code>{{ date.prefix }}</code>
                 <span>{{ date.evidence[0]!.text }} · page {{ date.evidence[0]!.page }}<span v-if="date.evidence.some(item => item.ambiguous)"> · ambiguous</span></span>
               </button>
@@ -310,8 +307,8 @@ onBeforeUnmount(() => {
       <p v-if="error" id="rename-error" class="error-message" role="alert">{{ error }}</p>
       <div class="rename-actions"><button class="rename-cancel" type="button" :disabled="saving" @click="cancel()">Cancel</button><button class="pdf-save" type="submit" :disabled="saving || !name.trim()">{{ saving ? 'Renaming…' : 'Rename' }}</button></div>
       </div>
-      <section v-if="isPdf" class="rename-preview" aria-label="Document with highlighted dates">
-        <div class="rename-preview-toolbar">
+      <section class="rename-preview" aria-label="Document with highlighted dates">
+        <div v-if="isPdf" class="rename-preview-toolbar">
           <button type="button" class="icon-button" :disabled="!pdf || page === 0" aria-label="Previous rename preview page" @click="page--"><i class="bi bi-chevron-left" aria-hidden="true" /></button>
           <span>Page {{ pdf ? page + 1 : '–' }} / {{ pdf?.numPages ?? '–' }}</span>
           <button type="button" class="icon-button" :disabled="!pdf || page === (pdf?.numPages ?? 0) - 1" aria-label="Next rename preview page" @click="page++"><i class="bi bi-chevron-right" aria-hidden="true" /></button>
@@ -323,10 +320,11 @@ onBeforeUnmount(() => {
         <p v-if="previewError" class="error-message" role="alert">{{ previewError }}</p>
         <div ref="previewPane" class="rename-preview-page" :class="{ 'is-zoomed': zoom > 1 }" @wheel="wheelZoom">
           <PdfCanvas v-if="pdf" :document="pdf" :page="page" :rotation="0" :zoom="zoom" :highlights="highlights" @error="previewError = $event" @rendered="previewRendered" />
+          <div v-else-if="preview?.kind === 'image'" class="image-viewer"><img :src="preview.url" :alt="entry.name" /></div>
           <div v-else class="empty-state"><p>{{ datesLoading ? 'Loading PDF…' : 'PDF preview unavailable.' }}</p></div>
         </div>
-        <p class="rename-preview-hint">Matching colors mark the dates on this page. Choose a date to show its location. Ctrl + scroll to zoom.</p>
+        <p v-if="isPdf" class="rename-preview-hint">Matching colors mark the dates on this page. Choose a date to show its location. Ctrl + scroll to zoom.</p>
       </section>
     </form>
-  </dialog>
+  </div>
 </template>
