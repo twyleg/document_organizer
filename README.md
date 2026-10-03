@@ -11,6 +11,36 @@ npm install
 npm run dev
 ```
 
+## Releases and continuous integration
+
+GitHub Actions runs `npm ci`, all tests, and the production build for every branch push and pull request on Linux and Apple Silicon macOS. The release workflow repeats those checks before packaging a version tag.
+
+Push a tag in the form **`vX.Y.Z`** that matches `package.json` exactly (for example, `v1.0.0` for version `1.0.0`). Prerelease tags such as `v1.1.0-beta.1` are also supported and create GitHub prereleases. Invalid or mismatched tags fail before packaging. To release a new patch version after committing your changes:
+
+```sh
+npm version patch
+git push origin HEAD
+git push origin "v$(node -p "require('./package.json').version")"
+```
+
+The workflow builds Linux **x64 AppImage and tar.gz** packages and macOS **Apple Silicon arm64 DMG and ZIP** packages. Both builds must succeed before a GitHub Release is published with all four downloads and `SHA256SUMS.txt`. Publishing uses GitHub's built-in token with `contents: write` only in the publishing job; no personal access token is required. A failed upload leaves a draft, and rerunning the workflow replaces existing assets for the same tag. Builds use [electron-builder](https://www.electron.build/) and native [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+The macOS application is **ad-hoc signed, without Apple notarization**. macOS may require approval through **System Settings → Privacy & Security → Open Anyway** on first launch. For Developer ID signing and notarization, replace the ad-hoc settings in `electron-builder.yml` and configure the Apple signing credentials following the [electron-builder signing instructions](https://www.electron.build/code-signing). Linux packages currently use Electron's default icon.
+
+To build packages locally on the respective operating system:
+
+```sh
+npm ci
+npm run package:linux   # Linux x64
+npm run package:mac     # macOS Apple Silicon
+```
+
+Packages are written to `release/`. They include Electron and the application, including local PDF assets and fonts. **OCRmyPDF, Tesseract, and German/English language data must be installed separately** as described below. On macOS, applications launched from Finder may not inherit Homebrew's command search path; launch from a terminal with Homebrew on `PATH` if OCRmyPDF cannot be found:
+
+```sh
+PATH="/opt/homebrew/bin:$PATH" "/Applications/Document Organizer.app/Contents/MacOS/Document Organizer"
+```
+
 ## First version
 
 The workspace keeps three views in one window:

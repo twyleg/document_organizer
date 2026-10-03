@@ -2,14 +2,16 @@
   "name": "electron-file-browser",
   "version": "1.0.0",
   "private": true,
-  "description": "A simple Electron file browser built with Vue, TypeScript, Vite and Bootstrap",
+  "description": "A local desktop workspace for organizing scanned documents",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "typecheck": "vue-tsc --noEmit",
     "build": "npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "package:linux": "npm run build && electron-builder --linux --x64 --publish never",
+    "package:mac": "npm run build && electron-builder --mac --arm64 --publish never"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -25,6 +27,7 @@
     "@types/node": "^26.6.2",
     "@vitejs/plugin-vue": "^6.0.9",
     "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",

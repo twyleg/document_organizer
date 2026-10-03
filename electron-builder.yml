@@ -1,0 +1,27 @@
+appId: io.github.twyleg.document-organizer
+productName: Document Organizer
+directories:
+  output: release
+files:
+  - out/**/*
+  - package.json
+asar: true
+artifactName: document-organizer-${version}-${os}-${arch}.${ext}
+linux:
+  category: Office
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: tar.gz
+      arch: [x64]
+mac:
+  category: public.app-category.productivity
+  # Ad-hoc signing supports Apple Silicon without an Apple Developer certificate.
+  identity: '-'
+  hardenedRuntime: false
+  notarize: false
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
