@@ -8,7 +8,8 @@ import type { Location } from '../shared/types'
 import { readPdf, savePdf } from './pdf'
 import { ocrPdf } from './ocr'
 import { InputDirectoryReader } from './inputDirectory'
-import { archiveEntry, createArchiveFolder, renameArchiveEntry, trashArchiveEntry } from './archive'
+import { archiveEntry, createArchiveFolder, renameArchiveEntry, trashArchiveEntry, moveArchiveFile } from './archive'
+import { inputFile, trashInputFile } from './inputActions'
 
 const inputDirectory = new InputDirectoryReader()
 
@@ -42,6 +43,20 @@ function registerHandlers() {
     { name: 'File system', path: parse(app.getPath('home')).root, icon: 'hdd' }
   ])
   handle('files:list', listDirectory)
+  handle('input:menu', async (root, path) => {
+    await inputFile(root, path)
+    return new Promise(resolve => {
+      let action: 'rename' | 'delete' | null = null
+      Menu.buildFromTemplate([
+        { label: 'Rename simple…', click: () => { action = 'rename' } },
+        { label: 'Delete…', click: () => { action = 'delete' } }
+      ]).popup({ window: window!, callback: () => resolve(action) })
+    })
+  })
+  handle('input:delete', async (root, path) => {
+    await trashInputFile(root, path, target => shell.trashItem(target))
+    if (activePreview?.path === path) { activePreview = null; previewGeneration++ }
+  })
   handle('archive:menu', async (root, path) => {
     const entry = await archiveEntry(root, path, true)
     return new Promise(resolve => {
@@ -55,6 +70,11 @@ function registerHandlers() {
     })
   })
   handle('archive:create', createArchiveFolder)
+  handle('archive:move', async (root, source, destination) => {
+    const path = await moveArchiveFile(root, source, destination)
+    if (activePreview?.path === source) { activePreview = null; previewGeneration++ }
+    return path
+  })
   handle('archive:rename', renameArchiveEntry)
   handle('archive:delete', (root, path) => trashArchiveEntry(root, path, target => shell.trashItem(target)))
   handle('files:input', (path) => inputDirectory.read(path))

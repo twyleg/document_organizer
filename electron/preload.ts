@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { FileBrowserAPI } from '../shared/types'
 
 const api: FileBrowserAPI = {
+  inputContextMenu: (root, path) => ipcRenderer.invoke('input:menu', root, path),
+  moveArchiveFile: (root, source, destination) => ipcRenderer.invoke('archive:move', root, source, destination),
+  deleteInputFile: (root, path) => ipcRenderer.invoke('input:delete', root, path),
   archiveContextMenu: (root, path) => ipcRenderer.invoke('archive:menu', root, path),
   createArchiveFolder: (root, parent, name) => ipcRenderer.invoke('archive:create', root, parent, name),
   renameArchiveEntry: (root, path, name) => ipcRenderer.invoke('archive:rename', root, path, name),

@@ -11,6 +11,8 @@ npm install
 npm run dev
 ```
 
+Development mode watches Electron main/preload code as well as the interface. Main-process changes restart Electron; preload changes reload the window so new `window.files` methods become available. If an already-running window reports that a method is missing after updating the project, fully quit and restart `npm run dev`. Save any pending PDF edits before changing Electron code during development.
+
 ## Releases and continuous integration
 
 GitHub Actions runs `npm ci`, all tests, and the production build for every branch push and pull request on Linux and Apple Silicon macOS. The release workflow repeats those checks before packaging a version tag.
@@ -53,6 +55,12 @@ Click an archive file, or focus it and press **Enter** or **Space**, to inspect 
 
 Right-click an archive folder to open a context menu with **New folder…**, **Rename…**, and **Delete…**. File menus offer rename and delete. New folders are created inside the clicked folder; the archive root supports folder creation and cannot itself be renamed or deleted. Name dialogs support **Enter** to apply and **Esc** to cancel, and existing names are never overwritten. Delete asks for confirmation and moves the entry (including a folder’s contents) to the system trash; there is no permanent-delete fallback. Linked entries and paths outside the archive cannot be modified. The tree, folder search and recommendations refresh after changes; renamed previews and selected destinations are updated, and deleting a previewed document restores the input preview.
 
+Right-click an input file and choose **Rename simple…** to open a small filename-only dialog without date suggestions or OCR autocomplete. The original name and extension are retained, and the filename stem is selected. **Enter** applies and **Esc** cancels; focus returns to the input file. Input **F2** still opens the assisted rename view.
+
+Focus an archive file or folder and press **F2** to open its simple rename dialog. The archive root cannot be renamed. Drag an archive file onto another archive folder, including the root, to move it within the archive. Folder dragging is not supported. Moves refuse name conflicts, keep the input selection, refresh the tree, and update an open preview of the moved file. Symbolic-link entries cannot be renamed or moved through these actions.
+
+Right-click an input file and choose **Delete…**, or focus its row and press **Delete**, to remove a duplicate scan. Both paths ask for confirmation, with **Cancel** focused initially. Confirmed deletion moves only that file to the system trash; trash errors leave the file in place and keep the dialog open. Transfers, active OCR and unsaved PDF edits block deletion. After deleting, the next visible input file is selected and focused, or the previous file if there is no next one. **Esc** cancels and returns focus to the selected input file. The Delete shortcut does not act while typing in text fields or browsing the archive.
+
 Each input row has a **right-arrow** button inside its highlight. Click it to select that file and open a slim menu next to the arrow with up to five recommended folder paths. Recommendations match the document’s embedded/OCR text and filename against archive folder names; hover over a folder for its full path and matching keywords. Click a suggestion to move the file immediately, or use **Up/Down** and **Enter**. **Esc** closes the menu and returns focus to the input file; clicking outside dismisses it. After moving, focus returns to the next input file. If no suggestions match, use **Ctrl+F** to find a folder and **Ctrl+Shift+Right** to move to the selected destination.
 
 Press **Ctrl+F**, or click **Find folder**, to search the entire archive hierarchy without manually expanding folders first. Search ignores case and accents and accepts multiple path terms (for example, `golf adac`). Use **Up/Down** to choose a result and **Enter** to open and select it in the tree; **Esc** cancels and restores focus. After choosing a result, **Shift+Left** returns to the input column. Folder indexing skips hidden folders and directory symlinks; linked folders remain browsable manually. Refresh the archive to include newly created folders.
@@ -94,6 +102,38 @@ python3 -m venv .venv-ocr
 ```
 
 The application uses `.venv-ocr/bin/ocrmypdf` when present, otherwise `ocrmypdf` on PATH. Set `DOCUMENT_ORGANIZER_OCRMYPDF` to an executable path for another installation. On Debian/Ubuntu, install `ocrmypdf tesseract-ocr-deu tesseract-ocr-eng` with apt instead. Restart the application after changing its PATH.
+
+## Batch OCR for an existing archive
+
+The batch script makes archived PDFs searchable in place. Backups are managed separately. Install dependencies with `npm ci` and install OCRmyPDF with German/English Tesseract data as described above. Close Document Organizer and pause scanner uploads or other archive changes during the batch run.
+
+Start with a read-only inventory:
+
+```sh
+npm run archive:ocr -- --archive /path/to/archive --dry-run
+```
+
+Run OCR in place:
+
+```sh
+npm run archive:ocr -- --archive /path/to/archive
+```
+
+Add `--threads 4` to process up to four PDFs concurrently (default: `1`):
+
+```sh
+npm run archive:ocr -- --archive /path/to/archive --threads 4
+```
+
+Each OCRmyPDF process uses two page workers, so four concurrent PDFs can use up to eight page workers. Choose the count to suit your CPU and available memory.
+
+The script does not create or verify backups. It processes regular PDFs recursively and leaves non-PDF files alone. Symbolic links are skipped.
+
+Each regular PDF is checked page by page. PDFs with text on every page remain unchanged. Other PDFs are processed with OCRmyPDF's `--skip-text` option, so pages already containing text are retained. Successful output replaces the source after PDF/page-count validation and source-change checks; failures keep the source intact. Blank pages can remain without text. Password-protected, damaged or signed documents may fail and are reported individually. Text presence does not prove recognition quality; inspect a representative sample afterward.
+
+Progress and errors are recorded in `ARCHIVE/.document-organizer-ocr-state.json`. Rerun the same command to resume; unchanged completed files, including files with blank pages, are skipped. New or changed PDFs are checked on the next run. Add **`--retry-errors`** to retry unchanged failed files after fixing their cause. Use **`--state /path/to/progress.json`** to store progress elsewhere; its parent directory must exist. Dry-run mode does not create or update progress files. Run only one batch at a time. **Ctrl+C** requests a stop; no new files are started, and active files finish and save their progress. Any failures produce a nonzero exit status.
+
+The script accepts **`--ocrmypdf /absolute/path/to/ocrmypdf`** or the existing `DOCUMENT_ORGANIZER_OCRMYPDF` environment variable for a custom engine. For example, pass `--ocrmypdf /path/to/document_organizer/.venv-ocr/bin/ocrmypdf` when using the project virtual environment.
 
 ## Renaming documents
 

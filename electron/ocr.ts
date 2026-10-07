@@ -1,12 +1,13 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
-import { access, chmod, lstat, open, rename, rm, mkdtemp, writeFile } from 'node:fs/promises'
+import { chmod, lstat, open, rename, rm, mkdtemp, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PDFDocument } from 'pdf-lib'
 import { readPdf, withPdfWrite } from './pdf'
 import { validatePath } from './filesystem'
+import { resolveOcrExecutable } from './ocrExecutable'
 
 const run = promisify(execFile)
 
@@ -23,17 +24,13 @@ export async function ocrPdf(value: unknown, version: unknown, executable?: stri
     try {
       const input = join(work, 'input.pdf')
       await writeFile(input, source.data)
-      let command = executable ?? process.env.DOCUMENT_ORGANIZER_OCRMYPDF
-      if (!command) {
-        const local = join(__dirname, '../../.venv-ocr', process.platform === 'win32' ? 'Scripts/ocrmypdf.exe' : 'bin/ocrmypdf')
-        try { await access(local); command = local } catch { command = 'ocrmypdf' }
-      }
+      const command = await resolveOcrExecutable(executable)
       try {
         await run(command, ['--skip-text', '--output-type', 'pdf', '--optimize', '0', '--jobs', '2',
           '--language', 'deu+eng', input, output], { timeout: 30 * 60 * 1000, maxBuffer: 2 * 1024 * 1024, windowsHide: true })
       } catch (cause) {
         const error = cause as NodeJS.ErrnoException & { stderr?: string }
-        if (error.code === 'ENOENT') throw new Error('OCRmyPDF is not installed. See the OCR setup instructions in README.md, then refresh to retry.')
+        if (error.code === 'ENOENT') throw new Error(`Could not launch OCRmyPDF executable "${command}". Check that it is installed and its Python interpreter exists. Use --ocrmypdf for the batch script or DOCUMENT_ORGANIZER_OCRMYPDF to specify its path, then retry.`)
         const detail = error.stderr?.trim().slice(-1500) || error.message
         throw new Error(`OCR failed; the original PDF has been kept. ${detail}`)
       }

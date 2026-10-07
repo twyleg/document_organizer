@@ -83,6 +83,6 @@ test('OCR and page edits serialize writes and refuse to overwrite the newer resu
     assert.equal(results[0]!.status, 'fulfilled')
     assert.equal(results[1]!.status, 'rejected')
     assert.equal((await PDFDocument.load((await readPdf(source)).data)).getPageCount(), 2)
-    await assert.rejects(ocrPdf(source, (await readPdf(source)).version, join(root, 'missing-engine')), /not installed/)
+    await assert.rejects(ocrPdf(source, (await readPdf(source)).version, join(root, 'missing-engine')), /Could not launch OCRmyPDF executable.*missing-engine/)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

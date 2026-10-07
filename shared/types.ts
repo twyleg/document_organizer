@@ -34,6 +34,9 @@ export interface PdfDocumentData {
 }
 
 export interface FileBrowserAPI {
+  inputContextMenu(root: string, path: string): Promise<'rename' | 'delete' | null>
+  moveArchiveFile(root: string, source: string, destination: string): Promise<string>
+  deleteInputFile(root: string, path: string): Promise<void>
   archiveContextMenu(root: string, path: string): Promise<'create' | 'rename' | 'delete' | null>
   createArchiveFolder(root: string, parent: string, name: string): Promise<string>
   renameArchiveEntry(root: string, path: string, name: string): Promise<string>

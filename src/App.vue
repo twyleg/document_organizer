@@ -33,6 +33,7 @@ const treeVersion = ref(0)
 const moving = ref(false)
 const moveNotice = ref('')
 const draggedPath = ref('')
+let dragSource: 'input' | 'archive' = 'input'
 let dragToken = ''
 const preview = ref<{ url: string; kind: 'pdf' | 'image' } | null>(null)
 const previewLoading = ref(false)
@@ -42,6 +43,10 @@ const editorState = ref({ dirty: false, saving: false })
 const editorLocked = computed(() => editorState.value.dirty || editorState.value.saving)
 const renameEntry = ref<FileEntry | null>(null)
 const renaming = ref(false)
+const inputDeleteEntry = ref<FileEntry>()
+const inputSimpleRenameEntry = ref<FileEntry>()
+const inputMenuPath = ref('')
+const deleting = ref(false)
 const archiveAction = ref<{ entry: FileEntry; action: 'create' | 'rename' | 'delete' }>()
 const folderSearchOpen = ref(false)
 const moveMenuOpen = ref(false)
@@ -60,10 +65,13 @@ let pollingInput = false
 const files = computed(() => (inbox.value?.entries ?? [])
   .filter(entry => !entry.isDirectory && !entry.name.startsWith('.'))
   .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })))
-const ocr = useInputOcr(files, computed(() => moving.value || inboxLoading.value), computed(() => {
+const ocr = useInputOcr(files, computed(() => moving.value || inboxLoading.value || deleting.value), computed(() => {
   const paths = new Set<string>()
   if (editorLocked.value || moveMenuOpen.value) paths.add(selectedPath.value)
   if (renameEntry.value) paths.add(renameEntry.value.path)
+  if (inputDeleteEntry.value) paths.add(inputDeleteEntry.value.path)
+  if (inputSimpleRenameEntry.value) paths.add(inputSimpleRenameEntry.value.path)
+  if (inputMenuPath.value) paths.add(inputMenuPath.value)
   return paths
 }), (path, data) => {
   const file = files.value.find(entry => entry.path === path)
@@ -80,9 +88,10 @@ const targets = useArchiveTargets(archive, treeVersion, selected, computed(() =>
 }))
 const viewed = computed(() => archivePreview.value ?? selected.value)
 function documentBusy(path: string) { return ocr.activePath.value === path || !!files.value.find(file => file.path === path)?.transferPending }
-function canMoveFile(path: string) { return !renameEntry.value && !editorLocked.value && !documentBusy(path) && !moving.value && !inboxLoading.value && !archiveLoading.value }
+function canMoveFile(path: string) { return !inputDeleteEntry.value && !inputSimpleRenameEntry.value && !inputMenuPath.value && !renameEntry.value && !archiveAction.value && !editorLocked.value && !documentBusy(path) && !moving.value && !inboxLoading.value && !archiveLoading.value }
 const canMove = computed(() => !!selected.value && canMoveFile(selected.value.path))
-const canDrop = computed(() => !!draggedPath.value && canMove.value)
+const canDragArchive = computed(() => !!archive.value && canMoveFile(archive.value.path) && !folderSearchOpen.value && !moveMenuOpen.value)
+const canDrop = computed(() => !!draggedPath.value && canMoveFile(draggedPath.value))
 const rootDrop = useFolderDrop(() => canDrop.value, event => { if (archive.value) dropTo(archive.value.path, event) })
 const selectedIndex = computed(() => visibleFiles.value.findIndex(entry => entry.path === selectedPath.value))
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
@@ -116,14 +125,14 @@ async function loadInbox(path: string) {
 }
 async function pollInbox() {
   const path = inbox.value?.path
-  if (!path || pollingInput || inboxLoading.value || moving.value || renaming.value) return
+  if (!path || pollingInput || inboxLoading.value || moving.value || renaming.value || deleting.value) return
   const request = inboxRequest
   const stamp = (entry: FileEntry) => `${entry.size}:${entry.modified}:${!!entry.transferPending}`
   const before = new Map(files.value.map(entry => [entry.path, stamp(entry)]))
   pollingInput = true
   try {
     const result = await window.files.listInputDirectory(path)
-    if (request !== inboxRequest || path !== inbox.value?.path || moving.value || renaming.value) return
+    if (request !== inboxRequest || path !== inbox.value?.path || moving.value || renaming.value || deleting.value) return
     const existing = new Map(inbox.value.entries.map(entry => [entry.path, entry]))
     let reloadPreview = false
     result.entries = result.entries.map(entry => {
@@ -169,6 +178,7 @@ function startDrag(event: DragEvent, path: string) {
   if (!canMoveFile(path) || !event.dataTransfer) { event.preventDefault(); return }
   archivePreview.value = null
   selectedPath.value = path
+  dragSource = 'input'
   draggedPath.value = path
   dragToken = crypto.randomUUID()
   event.dataTransfer.effectAllowed = 'move'
@@ -178,8 +188,58 @@ function endDrag() { draggedPath.value = ''; dragToken = '' }
 function dropTo(folder: string, event: DragEvent) {
   if (!canDrop.value || !dragToken || event.dataTransfer?.getData(documentDragType) !== dragToken) return
   const source = draggedPath.value
+  const fromArchive = dragSource === 'archive'
   endDrag()
-  void moveTo(folder, source)
+  if (fromArchive) void moveWithinArchive(folder, source)
+  else void moveTo(folder, source)
+}
+function startArchiveDrag(entry: FileEntry, event: DragEvent) {
+  if (!canDragArchive.value || entry.isDirectory || entry.isSymbolicLink || !event.dataTransfer) { event.preventDefault(); return }
+  dragSource = 'archive'
+  lastArchivePath = entry.path
+  draggedPath.value = entry.path
+  dragToken = crypto.randomUUID()
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData(documentDragType, dragToken)
+}
+async function moveWithinArchive(folder: string, source: string) {
+  const root = archive.value?.path
+  if (!root || !canDragArchive.value) return
+  moving.value = true
+  archiveError.value = ''
+  moveNotice.value = ''
+  await nextTick()
+  let movedPath = ''
+  let moveError = ''
+  try {
+    const path = await window.files.moveArchiveFile(root, source, folder)
+    movedPath = path
+    if (archivePreview.value?.path === source) archivePreview.value = { ...archivePreview.value, path }
+    lastArchivePath = path
+    destination.value = folder
+    moveNotice.value = `Moved ${folderName(source)} to ${folder}`
+  } catch (cause) { moveError = message(cause) }
+  finally {
+    await loadArchive(root)
+    if (moveError) archiveError.value = moveError
+    moving.value = false
+    if (movedPath) {
+      await openTarget(folder, true)
+      lastArchivePath = movedPath
+      // Destination contents are loaded lazily after its folder becomes visible.
+      for (let attempt = 0; attempt < 100; attempt++) {
+        await nextTick()
+        const row = Array.from(archiveTree.value?.querySelectorAll<HTMLElement>('[data-archive-entry="file"]') ?? []).find(row => row.title === movedPath)
+        if (row) { focusEntry(row); break }
+        await new Promise(resolve => setTimeout(resolve, 30))
+      }
+    } else focusArchive()
+  }
+}
+function simpleArchiveRename(entry: FileEntry) {
+  if (!canDragArchive.value || inputMenuPath.value || entry.isSymbolicLink) return
+  lastArchivePath = entry.path
+  archiveAction.value = { entry, action: 'rename' }
 }
 async function moveTo(folder: string, sourcePath = selectedPath.value) {
   const source = files.value.find(entry => entry.path === sourcePath)
@@ -220,8 +280,43 @@ function selectDocument(path: string) { if (!renameEntry.value && !editorLocked.
 function previewArchive(entry: FileEntry) {
   if (!editorLocked.value && !moving.value && !renameEntry.value) archivePreview.value = entry
 }
+function canDeleteInput(entry: FileEntry) {
+  return !!inbox.value && !entry.isSymbolicLink && !documentBusy(entry.path) && !editorLocked.value &&
+    !moving.value && !inboxLoading.value && !renameEntry.value && !archiveAction.value &&
+    !inputDeleteEntry.value && !inputSimpleRenameEntry.value && !folderSearchOpen.value && !moveMenuOpen.value
+}
+function requestInputDelete(entry: FileEntry) {
+  if (!canDeleteInput(entry)) return
+  selectDocument(entry.path)
+  inputDeleteEntry.value = entry
+}
+async function inputContext(entry: FileEntry) {
+  if (inputMenuPath.value || !canDeleteInput(entry) || !inbox.value) return
+  inputMenuPath.value = entry.path
+  selectDocument(entry.path)
+  try {
+    const action = await window.files.inputContextMenu(inbox.value.path, entry.path)
+    if (action === 'delete') requestInputDelete(entry)
+    else if (action === 'rename' && canDeleteInput(entry)) inputSimpleRenameEntry.value = entry
+  } catch (cause) { inboxError.value = message(cause) }
+  finally { inputMenuPath.value = ''; await nextTick(); if (!inputDeleteEntry.value && !inputSimpleRenameEntry.value) focusInput() }
+}
+async function cancelInputDelete() {
+  inputDeleteEntry.value = undefined
+  await nextTick()
+  focusInput()
+}
+async function inputDeleted(path: string) {
+  const index = visibleFiles.value.findIndex(entry => entry.path === path)
+  selectedPath.value = visibleFiles.value[index + 1]?.path ?? visibleFiles.value[index - 1]?.path ?? ''
+  archivePreview.value = null
+  if (inbox.value) await loadInbox(inbox.value.path)
+  inputDeleteEntry.value = undefined
+  await nextTick()
+  focusInput()
+}
 async function archiveContext(entry: FileEntry) {
-  if (!archive.value || renameEntry.value || editorLocked.value || moving.value || archiveLoading.value || archiveAction.value) return
+  if (!archive.value || renameEntry.value || editorLocked.value || moving.value || archiveLoading.value || archiveAction.value || inputDeleteEntry.value || inputSimpleRenameEntry.value || inputMenuPath.value) return
   lastArchivePath = entry.path
   if (entry.isDirectory) destination.value = entry.path
   focusArchive()
@@ -276,7 +371,7 @@ function focusInput() {
     ?? list?.querySelector<HTMLButtonElement>('.document-row:not(:disabled)') ?? inputPanel.value)
 }
 function folderSearchShortcut(event: KeyboardEvent) {
-  if (!event.ctrlKey || event.key.toLowerCase() !== 'f' || event.altKey || event.shiftKey || renameEntry.value || archiveAction.value) return
+  if (!event.ctrlKey || event.key.toLowerCase() !== 'f' || event.altKey || event.shiftKey || renameEntry.value || archiveAction.value || inputDeleteEntry.value || inputSimpleRenameEntry.value || inputMenuPath.value) return
   event.preventDefault()
   showFolderSearch()
 }
@@ -351,7 +446,7 @@ function focusArchive() {
     ?? tree?.querySelector<HTMLElement>('[data-archive-entry]') ?? tree)
 }
 async function columnShortcut(event: KeyboardEvent) {
-  if (event.altKey || event.metaKey || renameEntry.value || archiveAction.value) return
+  if (event.altKey || event.metaKey || renameEntry.value || archiveAction.value || inputDeleteEntry.value || inputSimpleRenameEntry.value || inputMenuPath.value) return
   const target = event.target instanceof Element ? event.target : null
   if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
   const column = target?.closest('.inbox-panel, .archive-panel')
@@ -399,9 +494,16 @@ async function columnShortcut(event: KeyboardEvent) {
   }
 }
 async function navigateInput(event: KeyboardEvent) {
+  if (event.key === 'Delete' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !event.isComposing) {
+    event.preventDefault()
+    const row = event.target instanceof Element ? event.target.closest('.input-file-row')?.querySelector('.document-row') : null
+    const entry = row ? visibleFiles.value.find(file => file.name === row.getAttribute('title')) : selected.value
+    if (!event.repeat && entry) requestInputDelete(entry)
+    return
+  }
   if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return
   event.preventDefault()
-  if (editorLocked.value || moving.value || inboxLoading.value || renameEntry.value || !visibleFiles.value.length) return
+  if (editorLocked.value || moving.value || inboxLoading.value || renameEntry.value || inputDeleteEntry.value || inputSimpleRenameEntry.value || inputMenuPath.value || !visibleFiles.value.length) return
   const focused = event.target instanceof Element ? event.target.closest('.input-file-row')?.querySelector('.document-row') : null
   const focusedIndex = focused && inputList.value ? Array.from(inputList.value.querySelectorAll('.document-row')).indexOf(focused) : -1
   const start = focusedIndex >= 0 ? focusedIndex : selectedIndex.value
@@ -486,8 +588,9 @@ function pdfSaved(metadata: { size: number; modified: number }) {
 }
 function renameShortcut(event: KeyboardEvent) {
   if (event.key !== 'F2') return
+  if (event.target instanceof Element && event.target.closest('.archive-panel')) return
   event.preventDefault()
-  if (event.repeat || renameEntry.value || folderSearchOpen.value || moveMenuOpen.value || archiveAction.value || moving.value || inboxLoading.value || archiveLoading.value || archivePreview.value || !selected.value) return
+  if (event.repeat || renameEntry.value || folderSearchOpen.value || moveMenuOpen.value || archiveAction.value || inputDeleteEntry.value || inputSimpleRenameEntry.value || inputMenuPath.value || moving.value || inboxLoading.value || archiveLoading.value || archivePreview.value || !selected.value) return
   if (documentBusy(selected.value.path)) { inboxError.value = 'Wait for this document’s transfer or OCR to finish before renaming it.'; return }
   if (editorLocked.value) { inboxError.value = 'Save or discard your PDF edits before renaming this document.'; return }
   inboxError.value = ''
@@ -495,15 +598,18 @@ function renameShortcut(event: KeyboardEvent) {
 }
 async function cancelRename() {
   renameEntry.value = null
+  inputSimpleRenameEntry.value = undefined
   await nextTick()
   focusInput()
 }
 async function renamed(path: string) {
-  if (renameEntry.value) await ocr.carryRename(renameEntry.value, path)
+  const entry = renameEntry.value ?? inputSimpleRenameEntry.value
+  if (entry) await ocr.carryRename(entry, path)
   search.value = ''
   selectedPath.value = path
   await Promise.all([inbox.value ? loadInbox(inbox.value.path) : undefined, archive.value ? loadArchive(archive.value.path) : undefined])
   renameEntry.value = null
+  inputSimpleRenameEntry.value = undefined
   await nextTick()
   focusInput()
 }
@@ -545,6 +651,8 @@ onBeforeUnmount(() => {
   <div class="organizer">
     <FolderSearch v-if="folderSearchOpen" :folders="targets.folders.value" :loading="targets.loading.value" :error="targets.error.value" @cancel="cancelFolderSearch" @select="openTarget($event, true)" />
     <MoveMenu v-if="moveMenuOpen && selected && moveMenuAnchor" :key="moveMenuPath" :anchor="moveMenuAnchor" :filename="selected.name" :recommendations="targets.recommendations.value" :loading="targets.loading.value || targets.textLoading.value" @cancel="cancelMoveMenu" @move="moveFromMenu" />
+    <ArchiveActionDialog v-if="inputSimpleRenameEntry && inbox" :root="inbox.path" :entry="inputSimpleRenameEntry" action="rename" scope="input" @cancel="cancelRename" @done="renamed" @busy="renaming = $event" />
+    <ArchiveActionDialog v-if="inputDeleteEntry && inbox" :root="inbox.path" :entry="inputDeleteEntry" action="delete" scope="input" @cancel="cancelInputDelete" @done="inputDeleted" @busy="deleting = $event" />
     <ArchiveActionDialog v-if="archiveAction && archive" :root="archive.path" :entry="archiveAction.entry" :action="archiveAction.action" @cancel="cancelArchiveAction" @done="archiveActionDone" />
     <header class="app-header">
       <div class="brand"><span class="brand-icon"><i class="bi bi-files" aria-hidden="true" /></span><div><h1>Document Organizer</h1><p>A place for every document.</p></div></div>
@@ -554,7 +662,7 @@ onBeforeUnmount(() => {
       <section ref="inputPanel" class="panel inbox-panel" tabindex="-1" aria-labelledby="inbox-title">
         <header class="panel-heading"><div class="heading-label"><span class="step-number">1</span><h2 id="inbox-title">Input documents</h2><span class="count">{{ files.length }}</span></div><p>Select a scan to review.</p></header>
         <div class="folder-controls">
-          <button class="choose-folder" :disabled="!!renameEntry || editorLocked || moving || inboxLoading || !available" @click="choose('inbox')"><i class="bi bi-folder2-open" aria-hidden="true" />{{ inbox ? 'Change input folder' : 'Choose input folder' }}</button>
+          <button class="choose-folder" :disabled="!!inputMenuPath || !!inputDeleteEntry || !!renameEntry || editorLocked || moving || inboxLoading || !available" @click="choose('inbox')"><i class="bi bi-folder2-open" aria-hidden="true" />{{ inbox ? 'Change input folder' : 'Choose input folder' }}</button>
           <button class="icon-button" title="Refresh input folder" aria-label="Refresh input folder" :disabled="editorLocked || moving || !inbox || inboxLoading" @click="inbox && loadInbox(inbox.path)"><i class="bi bi-arrow-clockwise" aria-hidden="true" /></button>
         </div>
         <p v-if="inbox" class="folder-path" :title="inbox.path">{{ inbox.path }}</p>
@@ -569,7 +677,7 @@ onBeforeUnmount(() => {
         <div class="panel-content" :aria-busy="inboxLoading">
           <div v-if="inboxLoading" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Reading input folder…</p></div>
           <ul v-else-if="visibleFiles.length" ref="inputList" class="document-list" aria-label="Input files" @keydown="navigateInput">
-            <li v-for="(entry, index) in visibleFiles" :key="entry.path" class="input-file-row" :class="{ selected: entry.path === selectedPath, dragging: entry.path === draggedPath }"><button class="document-row" :tabindex="entry.path === selectedPath || (selectedIndex < 0 && index === 0) ? 0 : -1" :disabled="!!renameEntry || editorLocked || moving" :draggable="canMoveFile(entry.path)" :class="{ selected: entry.path === selectedPath, dragging: entry.path === draggedPath }" @dragstart="startDrag($event, entry.path)" @dragend="endDrag" :aria-pressed="entry.path === selectedPath" :title="entry.name" @click="selectDocument(entry.path)"><span class="file-icon"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /></span><span class="file-details"><span class="file-title">{{ entry.name }}</span><span class="file-meta">{{ size(entry.size) }} · {{ date.format(entry.modified) }}</span><span v-if="entry.transferPending" class="ocr-status checking" title="Waiting for stable file size and modification time, and a complete PDF end marker.">Waiting for transfer…</span><span v-else-if="/\.pdf$/i.test(entry.name)" class="ocr-status" :class="ocr.statuses.value[entry.path]?.phase" :title="ocr.statuses.value[entry.path]?.detail">{{ ocr.statuses.value[entry.path]?.label ?? 'Text check queued' }}</span></span></button><button class="input-move-button" type="button" :disabled="!canMoveFile(entry.path) || !archive" :aria-label="`Move ${entry.name}`" :title="`Move ${entry.name}`" @focus="selectDocument(entry.path)" @click="showMoveMenu(entry.path, $event)" aria-haspopup="menu" :aria-expanded="moveMenuOpen && moveMenuPath === entry.path" :aria-controls="moveMenuOpen && moveMenuPath === entry.path ? 'quick-move-menu' : undefined"><i class="bi bi-arrow-right" aria-hidden="true" /></button></li>
+            <li v-for="(entry, index) in visibleFiles" :key="entry.path" class="input-file-row" @contextmenu.prevent.stop="inputContext(entry)" :class="{ selected: entry.path === selectedPath, dragging: entry.path === draggedPath }"><button class="document-row" :tabindex="entry.path === selectedPath || (selectedIndex < 0 && index === 0) ? 0 : -1" :disabled="!!renameEntry || editorLocked || moving" :draggable="canMoveFile(entry.path)" :class="{ selected: entry.path === selectedPath, dragging: entry.path === draggedPath }" @dragstart="startDrag($event, entry.path)" @dragend="endDrag" :aria-pressed="entry.path === selectedPath" :title="entry.name" @click="selectDocument(entry.path)"><span class="file-icon"><i :class="['bi', /\.pdf$/i.test(entry.name) ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text']" aria-hidden="true" /></span><span class="file-details"><span class="file-title">{{ entry.name }}</span><span class="file-meta">{{ size(entry.size) }} · {{ date.format(entry.modified) }}</span><span v-if="entry.transferPending" class="ocr-status checking" title="Waiting for stable file size and modification time, and a complete PDF end marker.">Waiting for transfer…</span><span v-else-if="/\.pdf$/i.test(entry.name)" class="ocr-status" :class="ocr.statuses.value[entry.path]?.phase" :title="ocr.statuses.value[entry.path]?.detail">{{ ocr.statuses.value[entry.path]?.label ?? 'Text check queued' }}</span></span></button><button class="input-move-button" type="button" :disabled="!canMoveFile(entry.path) || !archive" :aria-label="`Move ${entry.name}`" :title="`Move ${entry.name}`" @focus="selectDocument(entry.path)" @click="showMoveMenu(entry.path, $event)" aria-haspopup="menu" :aria-expanded="moveMenuOpen && moveMenuPath === entry.path" :aria-controls="moveMenuOpen && moveMenuPath === entry.path ? 'quick-move-menu' : undefined"><i class="bi bi-arrow-right" aria-hidden="true" /></button></li>
           </ul>
           <div v-else class="empty-state"><i class="bi bi-inbox" aria-hidden="true" /><h3>{{ !inbox ? 'Start with your scans' : search ? 'No matching documents' : 'Input folder is empty' }}</h3><p>{{ !inbox ? 'Choose the folder where your new scans arrive.' : search ? 'Try a different filename.' : 'New scans will appear here when you refresh.' }}</p></div>
         </div>
@@ -588,7 +696,7 @@ onBeforeUnmount(() => {
           <div v-if="archiveLoading && !archive" class="empty-state" role="status"><span class="spinner-border spinner-border-sm" /><p>Reading archive…</p></div>
           <template v-else-if="archive">
             <div class="tree-root-row" @contextmenu.prevent="archiveRootContext" :class="{ selected: destination === archive.path, 'drop-active': rootDrop.dropActive.value }" @dragenter="rootDrop.dragOver" @dragover="rootDrop.dragOver" @dragleave="rootDrop.dragLeave" @drop.stop="rootDrop.drop"><button class="tree-toggle" :aria-expanded="archiveExpanded" :aria-label="`${archiveExpanded ? 'Collapse' : 'Expand'} archive root`" @click="archiveExpanded = !archiveExpanded"><i :class="['bi', archiveExpanded ? 'bi-chevron-down' : 'bi-chevron-right']" aria-hidden="true" /></button><button class="tree-root" data-archive-entry="folder" :title="archive.path" :aria-pressed="destination === archive.path" @click="destination = archive.path"><i :class="['bi', archiveExpanded ? 'bi-folder2-open' : 'bi-folder2']" aria-hidden="true" /><span>{{ folderName(archive.path) }}</span></button></div>
-            <ul v-if="archiveExpanded" class="folder-list"><ArchiveFolder v-for="entry in archiveEntries" :key="entry.path" :entry="entry" :selected="destination" :viewed-path="archivePreview?.path" :reveal-path="revealPath" :can-drop="canDrop" :refresh-version="treeVersion" @select="destination = $event" @open="previewArchive" @context="archiveContext" @drop="dropTo" /></ul>
+            <ul v-if="archiveExpanded" class="folder-list"><ArchiveFolder v-for="entry in archiveEntries" :key="entry.path" :entry="entry" :selected="destination" :viewed-path="archivePreview?.path" :reveal-path="revealPath" :can-drop="canDrop" :can-drag="canDragArchive" :refresh-version="treeVersion" @select="destination = $event" @open="previewArchive" @context="archiveContext" @rename="simpleArchiveRename" @drag="startArchiveDrag" @dragend="endDrag" @drop="dropTo" /></ul>
             <p v-if="archiveExpanded && !archiveEntries.length" class="tree-hint">Archive folder is empty.</p>
           </template>
           <div v-else class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true" /><h3>Your digital filing cabinet</h3><p>Choose your archive root to browse its folders.</p></div>

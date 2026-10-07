@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { archiveEntry, createArchiveFolder, renameArchiveEntry, trashArchiveEntry } from '../electron/archive'
+import { archiveEntry, createArchiveFolder, renameArchiveEntry, trashArchiveEntry, moveArchiveFile } from '../electron/archive'
 
 async function fixture() {
   const base = await mkdtemp(join(tmpdir(), 'archive-actions-test-'))
@@ -11,6 +11,40 @@ async function fixture() {
   await mkdir(root)
   return { base, root }
 }
+test('moves an archive file between folders and to the archive root without overwriting', async () => {
+  const { base, root } = await fixture()
+  try {
+    const a = await createArchiveFolder(root, root, 'A')
+    const b = await createArchiveFolder(root, root, 'B')
+    const source = join(a, 'scan.pdf'), target = join(b, 'scan.pdf')
+    await writeFile(source, 'source'); await writeFile(target, 'existing')
+    await assert.rejects(moveArchiveFile(root, source, b), /already exists/)
+    assert.equal(await readFile(source, 'utf8'), 'source')
+    assert.equal(await readFile(target, 'utf8'), 'existing')
+    await rm(target)
+    assert.equal(await moveArchiveFile(root, source, b), target)
+    assert.deepEqual(await readdir(a), [])
+    assert.equal(await moveArchiveFile(root, target, root), join(root, 'scan.pdf'))
+    assert.equal(await readFile(join(root, 'scan.pdf'), 'utf8'), 'source')
+  } finally { await rm(base, { recursive: true, force: true }) }
+})
+test('archive moves reject folders, external destinations, links and the current folder', async () => {
+  const { base, root } = await fixture()
+  try {
+    const folder = await createArchiveFolder(root, root, 'A')
+    const outside = join(base, 'outside'); await mkdir(outside)
+    const source = join(root, 'scan.pdf'); await writeFile(source, 'source')
+    await assert.rejects(moveArchiveFile(root, folder, root), /regular file/)
+    await assert.rejects(moveArchiveFile(root, source, root), /already in/)
+    await assert.rejects(moveArchiveFile(root, source, outside), /inside the archive/)
+    await assert.rejects(moveArchiveFile(root, source, source), /archive folder/)
+    if (process.platform !== 'win32') {
+      await symlink(folder, join(root, 'linked'))
+      await assert.rejects(moveArchiveFile(root, source, join(root, 'linked')), /symbolic links/)
+    }
+    assert.equal(await readFile(source, 'utf8'), 'source')
+  } finally { await rm(base, { recursive: true, force: true }) }
+})
 test('creates nested folders and renames directories without losing their documents', async () => {
   const { base, root } = await fixture()
   try {

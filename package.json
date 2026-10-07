@@ -5,13 +5,14 @@
   "description": "A local desktop workspace for organizing scanned documents",
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev --watch",
     "typecheck": "vue-tsc --noEmit",
     "build": "npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
     "test": "tsx --test tests/*.test.ts",
     "package:linux": "npm run build && electron-builder --linux --x64 --publish never",
-    "package:mac": "npm run build && electron-builder --mac --arm64 --publish never"
+    "package:mac": "npm run build && electron-builder --mac --arm64 --publish never",
+    "archive:ocr": "tsx scripts/archive-ocr.ts"
   },
   "engines": {
     "node": ">=22.12.0"

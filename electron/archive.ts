@@ -1,6 +1,6 @@
 import { lstat, mkdir, realpath, rename, rmdir, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
-import { renameFile, validatePath } from './filesystem'
+import { moveFile, renameFile, validatePath } from './filesystem'
 
 function inside(root: string, path: string) {
   const part = relative(root, path)
@@ -52,4 +52,12 @@ export async function renameArchiveEntry(rootValue: unknown, pathValue: unknown,
 export async function trashArchiveEntry(rootValue: unknown, pathValue: unknown, trash: (path: string) => Promise<void>) {
   const entry = await archiveEntry(rootValue, pathValue)
   await trash(entry.path)
+}
+
+export async function moveArchiveFile(root: unknown, source: unknown, destination: unknown) {
+  const entry = await archiveEntry(root, source)
+  const folder = await archiveEntry(root, destination, true)
+  if (entry.isDirectory || !folder.isDirectory) throw new Error('Move a regular file into an archive folder.')
+  if (dirname(entry.path) === folder.path) throw new Error('This file is already in that folder.')
+  return moveFile(entry.path, folder.path)
 }
