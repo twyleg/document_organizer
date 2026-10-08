@@ -11,10 +11,18 @@ export interface RenamePreparation {
   words: FilenameWord[]
   keywords: string[]
 }
-export const inputContentKey = (file: Pick<FileEntry, 'path' | 'size' | 'modified'>) => `${file.path}\0${file.size}\0${file.modified}`
+
+export const inputContentKey = (file: Pick<FileEntry, 'path' | 'size' | 'modified'>) =>
+  `${file.path}\0${file.size}\0${file.modified}`
+
 export function prepareRenameText(pages: string[]) {
-  return { dates: findDocumentDates(pages), words: buildFilenameWords(pages), keywords: documentKeywords(pages) }
+  return {
+    dates: findDocumentDates(pages),
+    words: buildFilenameWords(pages),
+    keywords: documentKeywords(pages)
+  }
 }
+
 export function matchingPreparation(file: FileEntry, prepared?: RenamePreparation) {
   return !file.transferPending && prepared?.key === inputContentKey(file) ? prepared : undefined
 }

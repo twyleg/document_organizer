@@ -9,20 +9,35 @@ test('discovers the project OCR environment from source scripts and compiled Ele
   const base = await mkdtemp(join(tmpdir(), 'ocr-discovery-'))
   const previous = process.env.DOCUMENT_ORGANIZER_OCRMYPDF
   delete process.env.DOCUMENT_ORGANIZER_OCRMYPDF
+
   try {
     const entry = process.platform === 'win32' ? 'Scripts/ocrmypdf.exe' : 'bin/ocrmypdf'
     const local = join(base, '.venv-ocr', entry)
-    await mkdir(join(local, '..'), { recursive: true }); await writeFile(local, '')
+    await mkdir(join(local, '..'), { recursive: true })
+    await writeFile(local, '')
     assert.equal(await resolveOcrExecutable(undefined, join(base, 'electron')), local)
     assert.equal(await resolveOcrExecutable(undefined, join(base, 'out/main')), local)
     process.env.DOCUMENT_ORGANIZER_OCRMYPDF = '/custom/env-engine'
-    assert.equal(await resolveOcrExecutable(undefined, join(base, 'electron')), '/custom/env-engine')
-    assert.equal(await resolveOcrExecutable('/custom/cli-engine', join(base, 'electron')), '/custom/cli-engine')
+    assert.equal(
+      await resolveOcrExecutable(undefined, join(base, 'electron')),
+      '/custom/env-engine'
+    )
+    assert.equal(
+      await resolveOcrExecutable('/custom/cli-engine', join(base, 'electron')),
+      '/custom/cli-engine'
+    )
     delete process.env.DOCUMENT_ORGANIZER_OCRMYPDF
-    assert.equal(await resolveOcrExecutable(undefined, join(base, 'other/deep/location')), 'ocrmypdf')
+    assert.equal(
+      await resolveOcrExecutable(undefined, join(base, 'other/deep/location')),
+      'ocrmypdf'
+    )
   } finally {
-    if (previous === undefined) delete process.env.DOCUMENT_ORGANIZER_OCRMYPDF
-    else process.env.DOCUMENT_ORGANIZER_OCRMYPDF = previous
+    if (previous === undefined) {
+      delete process.env.DOCUMENT_ORGANIZER_OCRMYPDF
+    } else {
+      process.env.DOCUMENT_ORGANIZER_OCRMYPDF = previous
+    }
+
     await rm(base, { recursive: true, force: true })
   }
 })

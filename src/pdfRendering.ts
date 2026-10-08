@@ -10,9 +10,15 @@ export function getDocument(options: DocumentInitParameters) {
   const task = loadDocument({ ...options, worker })
   const destroy = task.destroy.bind(task)
   let destruction: Promise<void> | undefined
-  task.destroy = () => destruction ??= (async () => {
-    try { await destroy() }
-    finally { worker.destroy(); port.terminate() }
-  })()
+  task.destroy = () =>
+    (destruction ??= (async () => {
+      try {
+        await destroy()
+      } finally {
+        worker.destroy()
+        port.terminate()
+      }
+    })())
+
   return task
 }

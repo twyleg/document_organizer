@@ -4,8 +4,20 @@ import { isRevealBranch } from '../src/archiveReveal'
 
 test('exclusive folder reveal opens the target and ancestors, but not siblings or descendants', () => {
   const target = '/archive/Home/Electricity'
-  for (const folder of ['/archive', '/archive/Home', target]) assert.equal(isRevealBranch(folder, target), true)
-  for (const folder of ['/archive/Finance', '/archive/Homes', '/archive/Home/Electricity/Old', '/archive/Home/Electric']) assert.equal(isRevealBranch(folder, target), false)
+
+  for (const folder of ['/archive', '/archive/Home', target]) {
+    assert.equal(isRevealBranch(folder, target), true)
+  }
+
+  for (const folder of [
+    '/archive/Finance',
+    '/archive/Homes',
+    '/archive/Home/Electricity/Old',
+    '/archive/Home/Electric'
+  ]) {
+    assert.equal(isRevealBranch(folder, target), false)
+  }
+
   assert.equal(isRevealBranch('/archive/Home', ''), false)
   assert.equal(isRevealBranch('/archive/Home/', target), true)
 })

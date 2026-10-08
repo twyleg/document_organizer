@@ -203,6 +203,8 @@ npm start
 
 `npm run dev` starts Vite and Electron with renderer hot reload. `npm run build` checks TypeScript and builds to `out/`; `npm start` runs that production build. These commands do not generate an OS installer.
 
+Readability conventions and verification commands are documented in [CONTRIBUTING.md](CONTRIBUTING.md). Use `npm run format`, `npm run format:check`, and `npm run lint` to maintain the code style.
+
 ## Structure
 
 - `electron/index.ts`: window lifecycle, validated IPC handlers, and a local document preview protocol.

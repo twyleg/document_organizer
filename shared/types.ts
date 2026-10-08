@@ -49,8 +49,14 @@ export interface StartupDirectories {
 
 export interface FileBrowserAPI {
   startupDirectories(): Promise<StartupDirectories>
-  onArchiveIndexProgress(callback: (event: ArchiveIndexProgress & { requestId: string }) => void): () => void
-  archiveIndex(root: string, rebuild?: boolean, requestId?: string): Promise<import('./archiveSimilarity').ArchiveIndex | null>
+  onArchiveIndexProgress(
+    callback: (event: ArchiveIndexProgress & { requestId: string }) => void
+  ): () => void
+  archiveIndex(
+    root: string,
+    rebuild?: boolean,
+    requestId?: string
+  ): Promise<import('./archiveSimilarity').ArchiveIndex | null>
   inputContextMenu(root: string, path: string): Promise<'rename' | 'delete' | null>
   moveArchiveFile(root: string, source: string, destination: string): Promise<string>
   deleteInputFile(root: string, path: string): Promise<void>
