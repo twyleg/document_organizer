@@ -1,5 +1,6 @@
+import type { ArchiveSuggestion } from '../shared/archiveSimilarity'
 export interface ArchiveTarget { path: string; relative: string }
-export interface FolderRecommendation extends ArchiveTarget { score: number; keywords: string[] }
+export interface FolderRecommendation extends ArchiveTarget { score: number; keywords: string[]; examples?: { filename: string; folder: string }[] }
 
 export function normalizeFolderText(value: string) {
   return value.normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase().replace(/ß/g, 'ss')
@@ -38,4 +39,14 @@ export function recommendFolders(folders: ArchiveTarget[], text: string, filenam
     return { ...folder, score, keywords }
   }).filter(folder => folder.score > 0)
     .sort((a, b) => b.score - a.score || a.relative.localeCompare(b.relative)).slice(0, 5)
+}
+
+/** Map archive labels only to destinations that still exist in the active tree. */
+export function destinationsFromSimilarity(suggestion: ArchiveSuggestion | null, folders: ArchiveTarget[], root?: string): FolderRecommendation[] {
+  const byRelative = new Map(folders.map(folder => [folder.relative, folder]))
+  return (suggestion?.folders ?? []).flatMap(folder => {
+    const target = folder.value ? byRelative.get(folder.value) : folders.find(item => item.path === root)
+    return target ? [{ ...target, score: folder.score, keywords: folder.examples[0]?.keywords ?? [],
+      examples: folder.examples.map(match => ({ filename: match.document.filename, folder: match.document.folder })) }] : []
+  })
 }

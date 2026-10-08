@@ -1,8 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from 'electron'
+import { archiveIndexPath, buildArchiveIndex, migrateArchiveIndex } from './archiveIndex'
 import { randomUUID } from 'node:crypto'
 import { basename, join, parse } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { listDirectory, moveFile, previewFile, renameFile, validatePath } from './filesystem'
 import type { Location } from '../shared/types'
 import { readPdf, savePdf } from './pdf'
@@ -10,6 +11,8 @@ import { ocrPdf } from './ocr'
 import { InputDirectoryReader } from './inputDirectory'
 import { archiveEntry, createArchiveFolder, renameArchiveEntry, trashArchiveEntry, moveArchiveFile } from './archive'
 import { inputFile, trashInputFile } from './inputActions'
+
+import { startupDirectories } from './startupDirectories'
 
 const inputDirectory = new InputDirectoryReader()
 
@@ -34,6 +37,7 @@ function registerHandlers() {
       return fn(...args)
     })
   }
+  handle('files:startup-directories', () => startupDirectories(process.argv))
   handle('files:locations', (): Location[] => [
     { name: 'Home', path: app.getPath('home'), icon: 'house-door' },
     { name: 'Desktop', path: app.getPath('desktop'), icon: 'display' },
@@ -42,6 +46,22 @@ function registerHandlers() {
     { name: 'Pictures', path: app.getPath('pictures'), icon: 'image' },
     { name: 'File system', path: parse(app.getPath('home')).root, icon: 'hdd' }
   ])
+  const indexing = new Map<string, Promise<unknown>>()
+  handle('archive:index', async (rootValue, rebuild = false, requestId = '') => {
+    const requestedRoot = validatePath(rootValue)
+    const root = await realpath(requestedRoot)
+    const previous = indexing.get(root)
+    const pending = (previous ? previous.catch(() => {}) : Promise.resolve()).then(async () => {
+      const current = await migrateArchiveIndex(root, requestedRoot, app.getPath('userData'), rebuild)
+      return rebuild ? buildArchiveIndex(root, archiveIndexPath(root), undefined, progress => {
+        if (window && !window.webContents.isDestroyed()) window.webContents.send('archive:index-progress', { ...progress, requestId })
+      }) : current
+    }).finally(() => {
+      if (indexing.get(root) === pending) indexing.delete(root)
+    })
+    indexing.set(root, pending)
+    return pending
+  })
   handle('files:list', listDirectory)
   handle('input:menu', async (root, path) => {
     await inputFile(root, path)

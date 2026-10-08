@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import SuggestionHelp from './SuggestionHelp.vue'
 import type { FolderRecommendation } from '../folderTargets'
 const props = defineProps<{ anchor: HTMLElement; filename: string; recommendations: FolderRecommendation[]; loading: boolean }>()
 const emit = defineEmits<{ move: [path: string]; cancel: [restoreFocus: boolean] }>()
@@ -65,7 +66,10 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div id="quick-move-menu" ref="menu" class="quick-move-menu" popover="manual" role="menu" tabindex="-1" :aria-label="`Suggested folders for ${filename}`" @keydown="key">
-      <button v-for="folder in recommendations" :key="folder.path" type="button" role="menuitem" tabindex="-1" :title="`${folder.path}\nMatches: ${folder.keywords.join(', ')}`" @click="emit('move', folder.path)"><i class="bi bi-folder2" aria-hidden="true" /><span>{{ folder.relative }}</span></button>
+      <div v-for="folder in recommendations" :key="folder.path" class="move-suggestion-row" role="none">
+        <button type="button" role="menuitem" tabindex="-1" @click="emit('move', folder.path)"><i class="bi bi-folder2" aria-hidden="true" /><span>{{ folder.relative }}</span></button>
+        <SuggestionHelp :tabindex="-1" :explanation="[folder.path, ...(folder.examples ?? []).slice(0, 2).map(example => `${example.filename} · ${example.folder || '(archive root)'}`), `Shared keywords: ${folder.keywords.join(', ')}`].join('\n')" />
+      </div>
       <p v-if="loading && !recommendations.length" role="status">Finding suggestions…</p>
       <p v-else-if="!recommendations.length" role="status">No suggestions. Use Ctrl+F to find a folder.</p>
     </div>

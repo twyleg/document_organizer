@@ -33,7 +33,24 @@ export interface PdfDocumentData {
   modified: number
 }
 
+export interface ArchiveIndexProgress {
+  phase: 'scanning' | 'indexing' | 'saving' | 'complete'
+  total: number
+  processed: number
+  reused: number
+  errors: number
+  currentFile?: string
+}
+
+export interface StartupDirectories {
+  input?: string
+  archive?: string
+}
+
 export interface FileBrowserAPI {
+  startupDirectories(): Promise<StartupDirectories>
+  onArchiveIndexProgress(callback: (event: ArchiveIndexProgress & { requestId: string }) => void): () => void
+  archiveIndex(root: string, rebuild?: boolean, requestId?: string): Promise<import('./archiveSimilarity').ArchiveIndex | null>
   inputContextMenu(root: string, path: string): Promise<'rename' | 'delete' | null>
   moveArchiveFile(root: string, source: string, destination: string): Promise<string>
   deleteInputFile(root: string, path: string): Promise<void>

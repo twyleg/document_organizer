@@ -27,3 +27,22 @@ test('folder search matches multiple path terms, case, accents and German sharp 
   assert.deepEqual(searchFolders(folders, 'missing'), [])
   assert.equal(searchFolders(folders, '').length, folders.length)
 })
+
+test('similarity destinations preserve ranking and evidence while dropping vanished folders', async () => {
+  const { destinationsFromSimilarity } = await import('../src/folderTargets')
+  const { ArchiveSimilarity } = await import('../shared/archiveSimilarity')
+  const documents = [
+    { relativePath: 'Home/20250101_Grid-Bill.pdf', folder: 'Home', filename: '20250101_Grid-Bill.pdf', text: 'electricity meter tariff', pages: ['electricity meter tariff'], hash: 'a', missingPages: [], sender: 'Grid', subject: 'Bill' },
+    { relativePath: '20250101_Grid-Letter.pdf', folder: '', filename: '20250101_Grid-Letter.pdf', text: 'electricity meter letter', pages: ['electricity meter letter'], hash: 'b', missingPages: [], sender: 'Grid', subject: 'Letter' }
+  ]
+  const suggestion = new ArchiveSimilarity(documents).suggest(['electricity meter tariff'])
+  const tree = [{ path: '/archive', relative: 'archive' }, { path: '/archive/Home', relative: 'Home' }]
+  const destinations = destinationsFromSimilarity(suggestion, tree, '/archive')
+  assert.equal(destinations[0]?.path, '/archive/Home')
+  assert.equal(destinations[1]?.path, '/archive')
+  assert.equal(destinations[0]?.examples?.[0]?.filename, documents[0]!.filename)
+  assert.ok(destinations[0]?.keywords.includes('tariff'))
+  assert.deepEqual(destinationsFromSimilarity(suggestion, [tree[0]!], '/archive').map(folder => folder.path), ['/archive'])
+  assert.deepEqual(destinationsFromSimilarity(null, tree, '/archive'), [])
+  assert.deepEqual(destinationsFromSimilarity(new ArchiveSimilarity(documents).suggest(['penguin glacier expedition']), tree, '/archive'), [])
+})

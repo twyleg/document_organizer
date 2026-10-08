@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { FileEntry } from '../../shared/types'
+import { isRevealBranch } from '../archiveReveal'
 import { useFolderDrop } from '../folderDrop'
-const props = defineProps<{ entry: FileEntry; selected: string; viewedPath?: string; revealPath?: string; canDrop: boolean; canDrag: boolean; refreshVersion: number }>()
+const props = defineProps<{ entry: FileEntry; selected: string; viewedPath?: string; revealPath?: string; collapseVersion: number; canDrop: boolean; canDrag: boolean; refreshVersion: number }>()
 const emit = defineEmits<{ select: [path: string]; open: [entry: FileEntry]; context: [entry: FileEntry]; rename: [entry: FileEntry]; drag: [entry: FileEntry, event: DragEvent]; dragend: []; drop: [path: string, event: DragEvent] }>()
 const { dropActive, dragOver, dragLeave, drop } = useFolderDrop(() => props.canDrop, event => emit('drop', props.entry.path, event))
 const expanded = ref(false)
@@ -35,8 +36,9 @@ async function load() {
 }
 function retry() { expanded.value = false; void toggle() }
 watch(() => props.refreshVersion, () => { if (loaded.value || expanded.value) void load() })
-watch(() => props.revealPath, path => {
-  if (!path || !props.entry.isDirectory || (path !== props.entry.path && !path.startsWith(props.entry.path + '/') && !path.startsWith(props.entry.path + '\\'))) return
+watch([() => props.revealPath, () => props.collapseVersion], ([path, version], previous) => {
+  if (previous && version !== previous[1]) expanded.value = false
+  if (!path || !props.entry.isDirectory || !isRevealBranch(props.entry.path, path)) return
   expanded.value = true
   if (!loaded.value && !loading.value) void load()
 }, { immediate: true })
@@ -51,7 +53,7 @@ watch(() => props.revealPath, path => {
     <div v-if="expanded" class="tree-children">
       <p v-if="loading && !loaded" class="tree-hint" role="status">Loading folders…</p>
       <p v-else-if="error" class="tree-error" role="alert">{{ error }} <button @click="retry">Retry</button></p>
-      <template v-else><p v-if="skipped" class="tree-hint">{{ skipped }} unavailable item(s).</p><ul v-if="children.length" class="folder-list"><ArchiveFolder v-for="child in children" :key="child.path" :entry="child" :selected="props.selected" :viewed-path="viewedPath" :reveal-path="revealPath" :can-drop="canDrop" :can-drag="canDrag" :refresh-version="refreshVersion" @select="emit('select', $event)" @open="emit('open', $event)" @context="emit('context', $event)" @rename="emit('rename', $event)" @drag="(entry, event) => emit('drag', entry, event)" @dragend="emit('dragend')" @drop="(path, event) => emit('drop', path, event)" /></ul><p v-else class="tree-hint">Empty folder</p></template>
+      <template v-else><p v-if="skipped" class="tree-hint">{{ skipped }} unavailable item(s).</p><ul v-if="children.length" class="folder-list"><ArchiveFolder v-for="child in children" :key="child.path" :entry="child" :selected="props.selected" :viewed-path="viewedPath" :reveal-path="revealPath" :collapse-version="collapseVersion" :can-drop="canDrop" :can-drag="canDrag" :refresh-version="refreshVersion" @select="emit('select', $event)" @open="emit('open', $event)" @context="emit('context', $event)" @rename="emit('rename', $event)" @drag="(entry, event) => emit('drag', entry, event)" @dragend="emit('dragend')" @drop="(path, event) => emit('drop', path, event)" /></ul><p v-else class="tree-hint">Empty folder</p></template>
     </div>
   </li>
 </template>

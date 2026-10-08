@@ -1,7 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { FileBrowserAPI } from '../shared/types'
+import type { ArchiveIndexProgress, FileBrowserAPI } from '../shared/types'
 
 const api: FileBrowserAPI = {
+  startupDirectories: () => ipcRenderer.invoke('files:startup-directories'),
+  archiveIndex: (root, rebuild, requestId) => ipcRenderer.invoke('archive:index', root, rebuild, requestId),
+  onArchiveIndexProgress: callback => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: ArchiveIndexProgress & { requestId: string }) => callback(progress)
+    ipcRenderer.on('archive:index-progress', listener)
+    return () => { ipcRenderer.removeListener('archive:index-progress', listener) }
+  },
   inputContextMenu: (root, path) => ipcRenderer.invoke('input:menu', root, path),
   moveArchiveFile: (root, source, destination) => ipcRenderer.invoke('archive:move', root, source, destination),
   deleteInputFile: (root, path) => ipcRenderer.invoke('input:delete', root, path),

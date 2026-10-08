@@ -1,14 +1,18 @@
 <script setup lang="ts">
+import { matchingPreparation, type RenamePreparation } from '../renamePreparation'
+import { prepareRename } from '../prepareRename'
+import SuggestionHelp from './SuggestionHelp.vue'
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import type { ArchiveSuggestion } from '../../shared/archiveSimilarity'
 import type { FileEntry } from '../../shared/types'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
 import { openTextPdf, readDocumentText } from '../pdfText'
-import { findDocumentDates, type DateEvidence, type DateSuggestion } from '../documentDates'
+import { type DateEvidence, type DateSuggestion } from '../documentDates'
 import PdfCanvas from './PdfCanvas.vue'
 import type { PdfTextHighlight } from '../pdfHighlights'
-import { buildFilenameWords, filenameCompletions, type FilenameWord } from '../filenameCompletion'
+import { filenameCompletions, type FilenameWord } from '../filenameCompletion'
 
-const props = defineProps<{ entry: FileEntry; preview?: { url: string; kind: 'pdf' | 'image' } | null }>()
+const props = defineProps<{ entry: FileEntry; prepared?: RenamePreparation; suggestions?: ArchiveSuggestion | null; suggestionsLoading?: boolean; suggestionsError?: string; preview?: { url: string; kind: 'pdf' | 'image' } | null }>()
 const emit = defineEmits<{ cancel: []; renamed: [path: string]; busy: [value: boolean] }>()
 const panel = ref<HTMLElement>()
 const input = ref<HTMLInputElement>()
@@ -109,34 +113,55 @@ const highlights = computed(() => {
 })
 let disposed = false
 let textTask: PDFDocumentLoadingTask | undefined
+let cancelPreparation: (() => void) | undefined
+async function applyPrepared(ready: Pick<RenamePreparation, 'dates' | 'words'>) {
+  dates.value = ready.dates
+  words.value = ready.words
+  const first = dates.value[0]?.evidence[0]
+  datesLoading.value = false
+  if (first) {
+    name.value = dates.value[0]!.prefix + fileExtension
+    dateStage.value = 'dates'
+    page.value = first.page - 1
+    selectedOccurrence.value = occurrenceId(first)
+    if (dates.value.length === 1) await usePrefix(dates.value[0]!.prefix)
+    else {
+      await nextTick()
+      if (!disposed) panel.value?.querySelector<HTMLButtonElement>('.rename-date-option')?.focus()
+    }
+  } else {
+    dateStage.value = 'filename'
+    await focusFilename(true)
+  }
+}
 async function loadDates() {
   if (!datesLoading.value) return
   try {
     const data = await window.files.readPdf(props.entry.path)
     if (disposed) return
+    const cached = matchingPreparation(props.entry, props.prepared)
+    const ready = cached?.version === data.version ? cached : undefined
+    // Enable naming immediately from verified cached data; preview loading is separate.
+    if (ready) await applyPrepared(ready)
+    if (disposed) return
     const loaded = await openTextPdf(data, task => { textTask = task })
     if (disposed) { await loaded.task.destroy(); return }
     pdf.value = markRaw(loaded.pdf)
-    const text = await readDocumentText(loaded.pdf)
-    if (!disposed) {
-      dates.value = findDocumentDates(text.pages)
-      words.value = buildFilenameWords(text.pages)
-      const first = dates.value[0]?.evidence[0]
-      if (first) {
-        name.value = dates.value[0]!.prefix + fileExtension
-        dateStage.value = 'dates'
-        datesLoading.value = false
-        page.value = first.page - 1
-        selectedOccurrence.value = occurrenceId(first)
-        if (dates.value.length === 1) await usePrefix(dates.value[0]!.prefix)
-        else {
-          await nextTick()
-          if (!disposed) panel.value?.querySelector<HTMLButtonElement>('.rename-date-option')?.focus()
-        }
-      }
+    if (!ready) {
+      const text = await readDocumentText(loaded.pdf)
+      if (disposed) return
+      const preparation = prepareRename(text.pages)
+      cancelPreparation = preparation.cancel
+      const result = await preparation.promise
+      cancelPreparation = undefined
+      if (!disposed) await applyPrepared(result)
     }
   } catch (cause) {
-    if (!disposed) datesError.value = cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause)
+    if (!disposed) {
+      const detail = cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause)
+      if (datesLoading.value) datesError.value = detail
+      else previewError.value = detail
+    }
   } finally {
     datesLoading.value = false
     if (!disposed && dateStage.value === 'loading') {
@@ -243,6 +268,13 @@ function cancel(event?: Event) {
   event?.preventDefault()
   if (!saving.value) emit('cancel')
 }
+function useArchiveName(sender: string, subject: string) {
+  const prefix = /^\d{8}_/.exec(name.value)?.[0] ?? ''
+  name.value = `${prefix}${sender}-${subject}${fileExtension}`
+  dateStage.value = 'filename'
+  completionDismissed.value = true
+  void focusFilename()
+}
 async function apply() {
   if (saving.value || dateStage.value === 'loading') return
   if (dateStage.value === 'dates') { await usePrefix(dates.value[dateIndex.value]!.prefix); return }
@@ -266,6 +298,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   emit('busy', false)
   disposed = true
+  cancelPreparation?.()
   void textTask?.destroy()
 })
 </script>
@@ -303,6 +336,19 @@ onBeforeUnmount(() => {
             </li>
           </ul>
         </template>
+      </section>
+      <section v-if="suggestions || suggestionsLoading || suggestionsError" class="rename-dates" aria-label="Names from similar archived documents">
+        <h3>Names from similar archive documents</h3>
+        <p class="rename-date-message">Choose a name, then confirm Rename. Dates come from this document. Similarity is not a probability of correctness.</p>
+        <p v-if="suggestionsLoading" class="rename-date-message" role="status">Finding similar archive documents…</p>
+        <p v-else-if="suggestionsError" class="rename-date-message">Naming suggestions unavailable: {{ suggestionsError }}</p>
+        <p v-else-if="suggestions && !suggestions.names.length" class="rename-date-message">No suitable naming precedent found.</p>
+        <ul class="rename-date-list"><li v-for="suggestion in suggestions?.names ?? []" :key="`${suggestion.sender}-${suggestion.subject}`">
+          <div class="rename-suggestion-row">
+            <button type="button" class="rename-date-option" :disabled="saving" @click="useArchiveName(suggestion.sender, suggestion.subject)">{{ suggestion.sender }}-{{ suggestion.subject }}</button>
+            <SuggestionHelp :explanation="suggestion.examples.slice(0, 2).map(match => `${match.document.filename} · ${match.document.folder || '(archive root)'}\nShared keywords: ${match.keywords.join(', ')}`).join('\n\n')" />
+          </div>
+        </li></ul>
       </section>
       <p v-if="error" id="rename-error" class="error-message" role="alert">{{ error }}</p>
       <div class="rename-actions"><button class="rename-cancel" type="button" :disabled="saving" @click="cancel()">Cancel</button><button class="pdf-save" type="submit" :disabled="saving || !name.trim()">{{ saving ? 'Renaming…' : 'Rename' }}</button></div>
