@@ -33,7 +33,11 @@ jobs:
           const tag = process.env.RELEASE_TAG;
           const semver = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?$/;
           if (!semver.test(tag) || tag !== `v${version}`) {
-            throw new Error(`Expected a version tag matching package.json: v${version}; received ${tag}`);
+            throw new Error(
+              `Expected a version tag matching package.json: v${version}; received ${tag}.\n` +
+              'Please run locally: npm version x.y.z && git push origin HEAD --follow-tags\n' +
+              'Replace x.y.z with a new, unused release version. This updates the package files and creates the matching release tag.'
+            );
           }
           NODE
 
