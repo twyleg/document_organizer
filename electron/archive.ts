@@ -1,5 +1,16 @@
-import { lstat, mkdir, realpath, rename, rmdir, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { constants } from 'node:fs'
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+  stat
+} from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { moveFile, renameFile, validatePath } from './filesystem'
 
 function inside(root: string, path: string) {
@@ -137,4 +148,53 @@ export async function moveArchiveFile(root: unknown, source: unknown, destinatio
   }
 
   return moveFile(entry.path, folder.path)
+}
+
+/** Copy regular archive entries without overwriting or following symbolic links. */
+export async function copyArchiveEntry(root: unknown, source: unknown, destination: unknown) {
+  const entry = await archiveEntry(root, source)
+  const folder = await archiveEntry(root, destination, true)
+  if (!folder.isDirectory) {
+    throw new Error('Paste into an archive folder.')
+  }
+
+  const target = join(folder.path, basename(entry.path))
+  if (entry.isDirectory && inside(await realpath(entry.path), await realpath(folder.path))) {
+    throw new Error('A folder cannot be copied into itself or one of its descendants.')
+  }
+
+  async function copyEntry(sourcePath: string, targetPath: string) {
+    const current = await archiveEntry(root, sourcePath)
+    if (!current.isDirectory) {
+      await copyFile(current.path, targetPath, constants.COPYFILE_EXCL)
+      return
+    }
+
+    await mkdir(targetPath)
+    const reserved = await lstat(targetPath)
+
+    try {
+      for (const child of await readdir(current.path)) {
+        await copyEntry(join(current.path, child), join(targetPath, child))
+      }
+    } catch (cause) {
+      // Only remove the directory this operation created, never an existing target.
+      const currentTarget = await lstat(targetPath).catch(() => undefined)
+      if (currentTarget?.ino === reserved.ino && currentTarget.dev === reserved.dev) {
+        await rm(targetPath, { recursive: true, force: true })
+      }
+      throw cause
+    }
+  }
+
+  try {
+    await copyEntry(entry.path, target)
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error('An entry with this name already exists. Choose another destination folder.')
+    }
+    throw cause
+  }
+
+  return target
 }

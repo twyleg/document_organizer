@@ -667,11 +667,43 @@ async function archiveContext(entry: FileEntry) {
 
   try {
     const action = await window.files.archiveContextMenu(archive.value.path, entry.path)
-    if (action) {
+    if (action === 'copy' || action === 'paste' || action === 'open') {
+      await archiveClipboardAction(action, entry.path)
+    } else if (action) {
       archiveAction.value = { entry, action }
     }
   } catch (cause) {
     archiveError.value = message(cause)
+  }
+}
+
+async function archiveClipboardAction(action: 'copy' | 'paste' | 'open', path: string) {
+  const root = archive.value?.path
+  if (!root || moving.value || editorLocked.value || archiveLoading.value) {
+    return
+  }
+
+  archiveError.value = ''
+  try {
+    if (action === 'copy') {
+      await window.files.copyArchiveEntry(root, path)
+      moveNotice.value = `Copied ${folderName(path)}. Select a destination folder and paste.`
+    } else if (action === 'open') {
+      await window.files.openArchiveFolder(root, path)
+    } else {
+      moving.value = true
+      const copiedPath = await window.files.pasteArchiveEntry(root, path)
+      await loadArchive(root)
+      await openTarget(path, true)
+      lastArchivePath = copiedPath
+      moveNotice.value = `Pasted ${folderName(copiedPath)} into ${path}`
+    }
+  } catch (cause) {
+    archiveError.value = message(cause)
+  } finally {
+    if (action === 'paste') {
+      moving.value = false
+    }
   }
 }
 
@@ -935,7 +967,6 @@ function focusArchive() {
 async function columnShortcut(event: KeyboardEvent) {
   if (
     event.altKey ||
-    event.metaKey ||
     renameEntry.value ||
     archiveAction.value ||
     inputDeleteEntry.value ||
@@ -952,6 +983,30 @@ async function columnShortcut(event: KeyboardEvent) {
 
   const column = target?.closest('.inbox-panel, .archive-panel')
   if (!column) {
+    return
+  }
+
+  if (
+    column.classList.contains('archive-panel') &&
+    (event.ctrlKey || event.metaKey) &&
+    !event.shiftKey &&
+    !event.isComposing
+  ) {
+    const key = event.key.toLowerCase()
+    if (key === 'c' || key === 'v') {
+      event.preventDefault()
+      if (!event.repeat) {
+        const entry = target?.closest('[data-archive-entry]')
+        const path = entry?.getAttribute('title') ?? archive.value?.path
+        if (path) {
+          await archiveClipboardAction(key === 'c' ? 'copy' : 'paste', path)
+        }
+      }
+      return
+    }
+  }
+
+  if (event.metaKey) {
     return
   }
 

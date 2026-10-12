@@ -5,12 +5,13 @@ import { basename, join, parse } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { realpath, stat } from 'node:fs/promises'
 import { listDirectory, moveFile, previewFile, renameFile, validatePath } from './filesystem'
-import type { Location } from '../shared/types'
+import type { ArchiveMenuAction, Location } from '../shared/types'
 import { readPdf, savePdf } from './pdf'
 import { ocrPdf } from './ocr'
 import { InputDirectoryReader } from './inputDirectory'
 import {
   archiveEntry,
+  copyArchiveEntry,
   createArchiveFolder,
   renameArchiveEntry,
   trashArchiveEntry,
@@ -21,6 +22,7 @@ import { inputFile, trashInputFile } from './inputActions'
 import { startupDirectories } from './startupDirectories'
 
 const inputDirectory = new InputDirectoryReader()
+let copiedArchiveEntry: { root: string; path: string } | null = null
 
 let window: BrowserWindow | null = null
 let activePreview: { route: string; path: string; mime: string } | null = null
@@ -122,8 +124,33 @@ function registerHandlers() {
     const entry = await archiveEntry(root, path, true)
 
     return new Promise((resolve) => {
-      let action: 'create' | 'rename' | 'delete' | null = null
+      let action: ArchiveMenuAction | null = null
       Menu.buildFromTemplate([
+        {
+          label: 'Open in file explorer',
+          enabled: entry.isDirectory,
+          click: () => {
+            action = 'open'
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Copy',
+          accelerator: 'CommandOrControl+C',
+          enabled: entry.path !== entry.root,
+          click: () => {
+            action = 'copy'
+          }
+        },
+        {
+          label: 'Paste',
+          accelerator: 'CommandOrControl+V',
+          enabled: entry.isDirectory && copiedArchiveEntry?.root === entry.root,
+          click: () => {
+            action = 'paste'
+          }
+        },
+        { type: 'separator' },
         {
           label: 'New folder…',
           enabled: entry.isDirectory,
@@ -148,6 +175,27 @@ function registerHandlers() {
         }
       ]).popup({ window: window!, callback: () => resolve(action) })
     })
+  })
+  handle('archive:copy', async (root, path) => {
+    const entry = await archiveEntry(root, path)
+    copiedArchiveEntry = { root: entry.root, path: entry.path }
+  })
+  handle('archive:paste', async (root, destination) => {
+    const folder = await archiveEntry(root, destination, true)
+    if (!copiedArchiveEntry || copiedArchiveEntry.root !== folder.root) {
+      throw new Error('Copy an entry from this archive first.')
+    }
+    return copyArchiveEntry(root, copiedArchiveEntry.path, folder.path)
+  })
+  handle('archive:open-folder', async (root, path) => {
+    const entry = await archiveEntry(root, path, true)
+    if (!entry.isDirectory) {
+      throw new Error('Choose an archive folder to open in the file explorer.')
+    }
+    const error = await shell.openPath(entry.path)
+    if (error) {
+      throw new Error(error)
+    }
   })
   handle('archive:create', createArchiveFolder)
   handle('archive:move', async (root, source, destination) => {

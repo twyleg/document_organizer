@@ -6,3 +6,4 @@ release/
 .venv-ocr/
 
 .synthetic-archive/
+/document_organizer/

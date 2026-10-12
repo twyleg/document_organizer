@@ -20,6 +20,9 @@ const api: FileBrowserAPI = {
   moveArchiveFile: (root, source, destination) =>
     ipcRenderer.invoke('archive:move', root, source, destination),
   deleteInputFile: (root, path) => ipcRenderer.invoke('input:delete', root, path),
+  copyArchiveEntry: (root, path) => ipcRenderer.invoke('archive:copy', root, path),
+  pasteArchiveEntry: (root, destination) => ipcRenderer.invoke('archive:paste', root, destination),
+  openArchiveFolder: (root, path) => ipcRenderer.invoke('archive:open-folder', root, path),
   archiveContextMenu: (root, path) => ipcRenderer.invoke('archive:menu', root, path),
   createArchiveFolder: (root, parent, name) =>
     ipcRenderer.invoke('archive:create', root, parent, name),

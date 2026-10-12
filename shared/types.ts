@@ -47,6 +47,8 @@ export interface StartupDirectories {
   archive?: string
 }
 
+export type ArchiveMenuAction = 'create' | 'rename' | 'delete' | 'copy' | 'paste' | 'open'
+
 export interface FileBrowserAPI {
   startupDirectories(): Promise<StartupDirectories>
   onArchiveIndexProgress(
@@ -60,7 +62,10 @@ export interface FileBrowserAPI {
   inputContextMenu(root: string, path: string): Promise<'rename' | 'delete' | null>
   moveArchiveFile(root: string, source: string, destination: string): Promise<string>
   deleteInputFile(root: string, path: string): Promise<void>
-  archiveContextMenu(root: string, path: string): Promise<'create' | 'rename' | 'delete' | null>
+  archiveContextMenu(root: string, path: string): Promise<ArchiveMenuAction | null>
+  copyArchiveEntry(root: string, path: string): Promise<void>
+  pasteArchiveEntry(root: string, destination: string): Promise<string>
+  openArchiveFolder(root: string, path: string): Promise<void>
   createArchiveFolder(root: string, parent: string, name: string): Promise<string>
   renameArchiveEntry(root: string, path: string, name: string): Promise<string>
   deleteArchiveEntry(root: string, path: string): Promise<void>

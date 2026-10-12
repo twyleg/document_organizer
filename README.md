@@ -74,6 +74,32 @@ Packages are written to `release/`. They include Electron and the application, i
 PATH="/opt/homebrew/bin:$PATH" "/Applications/Document Organizer.app/Contents/MacOS/Document Organizer"
 ```
 
+## Updating a personal Linux installation
+
+Run the updater to install the latest stable GitHub release (Linux x86_64):
+
+```sh
+./update_document_organizer.sh "$HOME/.local/opt/document_organizer"
+mkdir -p "$HOME/.bin"
+ln -s "$HOME/.local/opt/document_organizer/latest" "$HOME/.bin/document-organizer"
+document-organizer
+```
+
+The `ln` command is a one-time setup. Run the updater with the same installation directory whenever you want to update. Without an argument, it uses `./document_organizer` relative to your current directory. No sudo, compilation, or additional server is needed. The script requires Bash, curl, Python 3, flock, and GNU coreutils.
+
+Each release is kept in its own directory, with `latest` pointing directly to its executable AppImage:
+
+```text
+document_organizer/
+├── v0.2.0/
+│   └── document-organizer-0.2.0-linux-x86_64.AppImage
+├── v0.3.0/
+│   └── document-organizer-0.3.0-linux-x86_64.AppImage
+└── latest -> v0.3.0/document-organizer-0.3.0-linux-x86_64.AppImage
+```
+
+The updater verifies the binary against the release's `SHA256SUMS.txt` before switching the symlink. Repeated runs reuse a verified downloaded version. Old releases remain available, and failed downloads or checksum checks leave the current symlink unchanged. OCR dependencies still need to be installed separately as described below.
+
 ## First version
 
 The workspace keeps three views in one window:
@@ -221,6 +247,14 @@ Readability conventions and verification commands are documented in [CONTRIBUTIN
 - `tests/filesystem.test.ts`: directory metadata, symlink/error handling, preview validation, move integrity, and collision protection tests.
 
 The renderer is sandboxed with context isolation and no Node integration. Filesystem access stays in the main process, and IPC checks the calling frame. The preview protocol serves only a selected PDF or supported image through an opaque temporary URL; it does not expose filesystem paths as navigable URLs. Additional windows, top-level page navigation, and permission requests are blocked. Documents are not uploaded to a service.
+
+## Archive copy and paste
+
+In the archive column, right-click a file or folder and choose **Copy**, then right-click a destination folder (including the archive root) and choose **Paste**. Keyboard users can focus an archive entry and press **Ctrl+C**, then focus a destination folder and press **Ctrl+V** (**Cmd+C/Cmd+V** on macOS). Text fields keep their normal clipboard shortcuts.
+
+Copying keeps the source intact and copies nested folders recursively. Existing names are never overwritten; choose another destination when a name already exists. Symbolic links are rejected, and folders cannot be pasted into themselves or their descendants. The app's archive clipboard is limited to the current archive and lasts for this application session; it does not exchange files with other applications.
+
+Right-click any archive directory and choose **Open in file explorer** to open it in your system's file manager.
 
 ## Archive text similarity baseline
 

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   archiveEntry,
+  copyArchiveEntry,
   createArchiveFolder,
   renameArchiveEntry,
   trashArchiveEntry,
@@ -143,6 +144,88 @@ test('deletion delegates to trash and a trash failure leaves the original intact
       /Trash unavailable/
     )
     assert.equal(await readFile(join(folder, 'scan.pdf'), 'utf8'), 'document')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('copies archive files and nested folders while retaining sources and refusing overwrites', async () => {
+  const { base, root } = await fixture()
+
+  try {
+    const sourceFolder = await createArchiveFolder(root, root, 'Fictional sender')
+    const nested = await createArchiveFolder(root, sourceFolder, 'Statements')
+    const destination = await createArchiveFolder(root, root, 'Review')
+    const filename = '20250115_Fictional sender-Statement.pdf'
+    await writeFile(join(nested, filename), 'fictional document')
+
+    const copiedFile = await copyArchiveEntry(root, join(nested, filename), root)
+    assert.equal(copiedFile, join(root, filename))
+    assert.equal(await readFile(copiedFile, 'utf8'), 'fictional document')
+    assert.equal(await readFile(join(nested, filename), 'utf8'), 'fictional document')
+    await assert.rejects(copyArchiveEntry(root, join(nested, filename), root), /already exists/)
+    assert.equal(await readFile(copiedFile, 'utf8'), 'fictional document')
+
+    const copiedFolder = await copyArchiveEntry(root, sourceFolder, destination)
+    assert.equal(
+      await readFile(join(copiedFolder, 'Statements', filename), 'utf8'),
+      'fictional document'
+    )
+    assert.equal(await readFile(join(nested, filename), 'utf8'), 'fictional document')
+    await assert.rejects(copyArchiveEntry(root, sourceFolder, destination), /already exists/)
+    assert.equal(
+      await readFile(join(copiedFolder, 'Statements', filename), 'utf8'),
+      'fictional document'
+    )
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('archive copies reject root, descendants, external paths and non-folder destinations', async () => {
+  const { base, root } = await fixture()
+
+  try {
+    const source = await createArchiveFolder(root, root, 'Source')
+    const child = await createArchiveFolder(root, source, 'Child')
+    const outside = join(base, 'outside')
+    await mkdir(outside)
+    const document = join(source, 'document.pdf')
+    await writeFile(document, 'fictional document')
+
+    await assert.rejects(copyArchiveEntry(root, root, child), /root/)
+    await assert.rejects(copyArchiveEntry(root, source, source), /descendants/)
+    await assert.rejects(copyArchiveEntry(root, source, child), /descendants/)
+    await assert.rejects(copyArchiveEntry(root, source, outside), /inside the archive/)
+    await assert.rejects(copyArchiveEntry(root, source, document), /archive folder/)
+    await assert.rejects(copyArchiveEntry(root, document, source), /already exists/)
+    assert.deepEqual(await readdir(child), [])
+    assert.equal(await readFile(document, 'utf8'), 'fictional document')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('a symbolic link in a copied subtree aborts and removes only the incomplete copy', async () => {
+  const { base, root } = await fixture()
+
+  try {
+    const source = await createArchiveFolder(root, root, 'Source')
+    const destination = await createArchiveFolder(root, root, 'Destination')
+    const outside = join(base, 'outside.pdf')
+    await writeFile(outside, 'private fictional contents')
+    await writeFile(join(source, 'a.pdf'), 'fictional document')
+    await writeFile(join(destination, 'existing.pdf'), 'existing document')
+    await symlink(outside, join(source, 'z.pdf'))
+
+    await assert.rejects(copyArchiveEntry(root, source, destination), /symbolic links/)
+    assert.deepEqual(await readdir(destination), ['existing.pdf'])
+    assert.equal(await readFile(join(source, 'a.pdf'), 'utf8'), 'fictional document')
+    assert.equal(await readFile(outside, 'utf8'), 'private fictional contents')
+    await assert.rejects(
+      copyArchiveEntry(root, join(source, 'z.pdf'), destination),
+      /symbolic links/
+    )
   } finally {
     await rm(base, { recursive: true, force: true })
   }
