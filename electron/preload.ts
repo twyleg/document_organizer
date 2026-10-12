@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { ArchiveIndexProgress, FileBrowserAPI } from '../shared/types'
 
 const api: FileBrowserAPI = {
+  appVersion: () => ipcRenderer.invoke('app:version'),
   startupDirectories: () => ipcRenderer.invoke('files:startup-directories'),
   archiveIndex: (root, rebuild, requestId) =>
     ipcRenderer.invoke('archive:index', root, rebuild, requestId),

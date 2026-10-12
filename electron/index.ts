@@ -21,6 +21,12 @@ import { inputFile, trashInputFile } from './inputActions'
 
 import { startupDirectories } from './startupDirectories'
 
+// Print the application version without opening a workspace or reading documents.
+if (process.argv.includes('--version')) {
+  console.log(app.getVersion())
+  app.exit(0)
+}
+
 const inputDirectory = new InputDirectoryReader()
 let copiedArchiveEntry: { root: string; path: string } | null = null
 
@@ -52,6 +58,7 @@ function registerHandlers() {
       return fn(...args)
     })
   }
+  handle('app:version', () => app.getVersion())
   handle('files:startup-directories', () => startupDirectories(process.argv))
   handle('files:locations', (): Location[] => [
     { name: 'Home', path: app.getPath('home'), icon: 'house-door' },

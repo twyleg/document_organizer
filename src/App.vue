@@ -14,6 +14,7 @@ import { applyTheme } from './theme'
 import { matchingPreparation } from './renamePreparation'
 import { useInputOcr } from './useInputOcr'
 
+const applicationVersion = ref('')
 const darkMode = ref(document.documentElement.dataset.theme === 'dark')
 
 function toggleDarkMode() {
@@ -1394,6 +1395,7 @@ onMounted(async () => {
   }
 
   try {
+    applicationVersion.value = await window.files.appVersion()
     startup = await window.files.startupDirectories()
   } catch (cause) {
     inboxError.value = archiveError.value = message(cause)
@@ -1490,7 +1492,16 @@ function clearFilenameFilter() {
             class="bi bi-files"
             aria-hidden="true"
         /></span>
-        <div><h1>Document Organizer</h1></div>
+        <div class="brand-title">
+          <h1>Document Organizer</h1>
+          <span
+            v-if="applicationVersion"
+            class="app-version"
+            :title="`Version ${applicationVersion}`"
+          >
+            v{{ applicationVersion }}
+          </span>
+        </div>
       </div>
       <button
         type="button"

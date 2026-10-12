@@ -38,7 +38,16 @@ To open that custom environment, override the UAT defaults:
 npm run uat -- --input /tmp/document-organizer-review/input --archive /tmp/document-organizer-review/archive
 ```
 
-The application accepts `--input` and `--archive` (also `--input=PATH` / `--archive=PATH`). Quote paths containing spaces; relative paths resolve from the launch directory. Later arguments override earlier ones. Packaged launches without directory arguments use remembered folders. With electron-vite directly, put app arguments after its `--` separator, e.g. `npx electron-vite preview -- --input /path/input --archive /path/archive`. Missing or inaccessible directories show an error and can be selected using the folder pickers.
+The application accepts `--input_directory DIR_PATH` and `--archive_directory DIR_PATH` (also `--input_directory=PATH` / `--archive_directory=PATH`). The existing `--input` and `--archive` names remain supported. Quote paths containing spaces; relative paths resolve from the launch directory. Later arguments override earlier ones, including when mixing aliases. Startup paths override remembered folders for that session. Missing or inaccessible directories show an error and can be selected using the folder pickers.
+
+```sh
+document-organizer --version
+document-organizer --input_directory "$HOME/Scans" --archive_directory "$HOME/Archive"
+npm run dev -- -- --input_directory /path/input --archive_directory /path/archive
+```
+
+`--version` prints the application version and exits without opening a window or processing documents. The same version appears next to **Document Organizer** in the header. It comes from the application's `package.json`, including in packaged releases. When using electron-vite, put application arguments after its `--` separator as shown above. Packaged launches without directory options use remembered folders.
+
 
 Synthetic results do not establish real-archive accuracy. The separate `archive:similarity generate` command below remains available for automated holdout evaluation.
 

@@ -8,7 +8,9 @@ export function startupDirectories(args: string[], cwd = process.cwd()): Startup
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     const flag = arg.split('=', 1)[0]
-    if (flag !== '--input' && flag !== '--archive') {
+    const isInput = flag === '--input' || flag === '--input_directory'
+    const isArchive = flag === '--archive' || flag === '--archive_directory'
+    if (!isInput && !isArchive) {
       continue
     }
 
@@ -17,7 +19,7 @@ export function startupDirectories(args: string[], cwd = process.cwd()): Startup
       throw new Error(`${flag} requires a directory path.`)
     }
 
-    directories[flag === '--input' ? 'input' : 'archive'] = resolve(cwd, value)
+    directories[isInput ? 'input' : 'archive'] = resolve(cwd, value)
   }
 
   return directories

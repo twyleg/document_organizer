@@ -50,6 +50,7 @@ export interface StartupDirectories {
 export type ArchiveMenuAction = 'create' | 'rename' | 'delete' | 'copy' | 'paste' | 'open'
 
 export interface FileBrowserAPI {
+  appVersion(): Promise<string>
   startupDirectories(): Promise<StartupDirectories>
   onArchiveIndexProgress(
     callback: (event: ArchiveIndexProgress & { requestId: string }) => void
