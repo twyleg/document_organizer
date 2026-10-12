@@ -87,6 +87,10 @@ shutil.copyfile(source, sys.argv[sys.argv.index('--output') + 1])
   }
 }
 
+function assertSuccessfulUpdate(result: { status: number | null; stderr: string; stdout: string }) {
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+}
+
 test(
   'updater installs verified versions, reuses downloads, and switches its executable symlink',
   { skip: linuxOnly },
@@ -94,19 +98,19 @@ test(
     const environment = await fixture()
     try {
       const first = await environment.release('1.0.0')
-      assert.equal(environment.run().status, 0)
+      assertSuccessfulUpdate(environment.run())
       assert.equal(
         await readlink(join(environment.installation, 'latest')),
         `v1.0.0/${first.filename}`
       )
       assert.deepEqual(await readFile(join(environment.installation, 'latest')), first.binary)
 
-      assert.equal(environment.run().status, 0)
+      assertSuccessfulUpdate(environment.run())
       const requests = (await readFile(join(environment.root, 'requests.txt'), 'utf8')).split('\n')
       assert.equal(requests.filter((name) => name === first.filename).length, 1)
 
       const second = await environment.release('1.1.0')
-      assert.equal(environment.run().status, 0)
+      assertSuccessfulUpdate(environment.run())
       assert.equal(
         await readlink(join(environment.installation, 'latest')),
         `v1.1.0/${second.filename}`
@@ -133,7 +137,7 @@ test(
     const environment = await fixture()
     try {
       const first = await environment.release('1.0.0')
-      assert.equal(environment.run().status, 0)
+      assertSuccessfulUpdate(environment.run())
 
       for (const options of [
         { badChecksum: true },
@@ -170,7 +174,7 @@ test(
     const environment = await fixture()
     try {
       const first = await environment.release('1.0.0')
-      assert.equal(environment.run().status, 0)
+      assertSuccessfulUpdate(environment.run())
       await writeFile(join(environment.installation, 'v1.0.0', first.filename), 'corrupted binary')
       assert.notEqual(environment.run().status, 0)
       assert.equal(
